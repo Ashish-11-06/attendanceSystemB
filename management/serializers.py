@@ -142,9 +142,10 @@ class AttendanceSerializer(serializers.ModelSerializer):
     # Use ID for write
     volunteer = serializers.PrimaryKeyRelatedField(queryset=Volunteer.objects.all())
     event = serializers.PrimaryKeyRelatedField(queryset=Events.objects.all())
+    unit = serializers.PrimaryKeyRelatedField(queryset=Unit.objects.all(), required=False)
     class Meta:
         model = Attendance
-        fields = ['id', 'atd_id', 'present', 'absent', 'in_time', 'out_time', 'date', 'remark', 'volunteer', 'event']
+        fields = ['id', 'atd_id', 'present', 'absent', 'in_time', 'out_time', 'date', 'remark', 'volunteer', 'event', 'unit']
         read_only_fields = ('atd_id',)
 
     # Use nested serializer for read

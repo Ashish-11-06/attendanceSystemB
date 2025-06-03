@@ -97,6 +97,7 @@ class Attendance(models.Model):
     atd_id = models.CharField(max_length=200)
     volunteer = models.ForeignKey('management.Volunteer', on_delete=models.CASCADE, null=True)
     event = models.ForeignKey('management.Events', on_delete=models.CASCADE, null=True)
+    unit = models.ForeignKey('management.Unit', on_delete=models.CASCADE, null=True)
     date = models.DateField()
     in_time = models.TimeField()
     out_time = models.TimeField(null=True, blank=True)
