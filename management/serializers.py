@@ -1,11 +1,41 @@
 from rest_framework import serializers
-from .models import Admin, Attendance, AttendanceFile, Events, Location, Unit, Volunteer
+from .models import Admin, Attendance, AttendanceFile, Events, Location, Register, Unit, Volunteer
 
+
+class RegisterSerializer(serializers.ModelSerializer):
+    otp = serializers.CharField(max_length=10, required=False, write_only=True)
+    unit_name = serializers.CharField(max_length=250, write_only=True)
+
+    class Meta:
+        model = Register  # your model name
+        fields = ['email', 'password', 'otp', 'unit_name']
+        extra_kwargs = {
+            'password': {'write_only': True}
+        }
+        
+class LoginSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    password = serializers.CharField(required=True)
+    user_type = serializers.ChoiceField(choices=['admin', 'unit'], required=True)
 
 class LocationSerializer(serializers.ModelSerializer):
+    location_id = serializers.CharField(read_only=True)
     class Meta:
         model = Location
         fields = '__all__'
+        
+    def create(self, validated_data):
+        # Generate location_id like LOC001, LOC002 ...
+        last_location = Location.objects.order_by('location_id').last()
+        if last_location:
+            last_id_num = int(last_location.location_id.replace('LOC', ''))
+            new_id_num = last_id_num + 1
+        else:
+            new_id_num = 1
+
+        validated_data['location_id'] = f"LOC{new_id_num:03d}"
+        return super().create(validated_data)
+
 
 # class EventsSerializer(serializers.ModelSerializer):
 #     location = LocationSerializer()
@@ -14,55 +44,108 @@ class LocationSerializer(serializers.ModelSerializer):
 #         fields = ['id', 'eventId', 'event_name', 'date', 'time','location', 'created_at']
         
 class EventsSerializer(serializers.ModelSerializer):
-    # This allows writing using just the ID
-    location = serializers.PrimaryKeyRelatedField(queryset=Location.objects.all())
+    # Accept multiple location IDs
+    location = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=Location.objects.all()
+    )
 
     class Meta:
         model = Events
-        fields = ['id', 'event_id', 'event_name', 'date', 'time','location', 'created_at']
+        fields = ['id', 'event_id', 'event_name', 'start_date', 'end_date', 'time', 'location', 'created_at']
+        read_only_fields = ('event_id',)
 
-    # Use nested LocationSerializer only for reading
+    def create(self, validated_data):
+        locations = validated_data.pop('location', [])
+        # Generate event_id like EVE001, EVE002 ...
+        last_event = Events.objects.order_by('event_id').last()
+        if last_event:
+            last_id_num = int(last_event.event_id.replace('EVE', ''))
+            new_id_num = last_id_num + 1
+        else:
+            new_id_num = 1
+
+        validated_data['event_id'] = f"EVE{new_id_num:03d}"
+        event = Events.objects.create(**validated_data)
+        event.location.set(locations)
+        return event
+
+    def update(self, instance, validated_data):
+        locations = validated_data.pop('location', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if locations is not None:
+            instance.location.set(locations)
+        return instance
+
     def to_representation(self, instance):
         representation = super().to_representation(instance)
-        representation['location'] = LocationSerializer(instance.location).data
+        representation['location'] = LocationSerializer(instance.location.all(), many=True).data
         return representation
-
-        
-    
-       
+         
 class UnitSerializer(serializers.ModelSerializer):
+    # password = serializers.CharField(write_only=True)
     class Meta:
         model = Unit # Assuming Unit is defined in management.models
         fields = '__all__'
         
 class VolunteerSerializer(serializers.ModelSerializer):
-    # Accept only unit ID in write operations
+    # Accept only unit ID during write
     unit = serializers.PrimaryKeyRelatedField(queryset=Unit.objects.all())
 
     class Meta:
         model = Volunteer
-        fields = ['id', 'volunteer_id', 'name', 'email', 'old_personal_number', 'new_personal_number', 'gender', 'unit']
+        fields = ['id', 'volunteer_id', 'name', 'email', 'phone', 'old_personal_number', 'new_personal_number', 'gender', 'unit']
+        read_only_fields = ('volunteer_id',)
 
-    # Return full nested unit data in read operations
+    def create(self, validated_data):
+        # Generate volunteer_id like VOL001, VOL002 ...
+        last_volunteer = Volunteer.objects.order_by('volunteer_id').last()
+        if last_volunteer:
+            last_id_num = int(last_volunteer.volunteer_id.replace('VOL', ''))
+            new_id_num = last_id_num + 1
+        else:
+            new_id_num = 1
+
+        validated_data['volunteer_id'] = f"VOL{new_id_num:03d}"
+        return super().create(validated_data)
+
+    # Return full nested unit data in read
     def to_representation(self, instance):
         representation = super().to_representation(instance)
         representation['unit'] = UnitSerializer(instance.unit).data
         return representation
-
-        
+    
+    
 class AdminSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True)
     class Meta:
         model = Admin  # Assuming Admin is defined in management.models
         fields = '__all__'
+        read_only_fields = ('admin_id',)
+
+    def create(self, validated_data):
+        # Generate admin_id like ADM001, ADM002 ...
+        last_admin = Admin.objects.order_by('admin_id').last()
+        if last_admin:
+            last_id_num = int(last_admin.admin_id.replace('ADM', ''))
+            new_id_num = last_id_num + 1
+        else:
+            new_id_num = 1
+
+        validated_data['admin_id'] = f"ADM{new_id_num:03d}"
+        return super().create(validated_data)
+
         
 class AttendanceSerializer(serializers.ModelSerializer):
     # Use ID for write
     volunteer = serializers.PrimaryKeyRelatedField(queryset=Volunteer.objects.all())
     event = serializers.PrimaryKeyRelatedField(queryset=Events.objects.all())
-
     class Meta:
         model = Attendance
         fields = ['id', 'atd_id', 'present', 'absent', 'in_time', 'out_time', 'date', 'remark', 'volunteer', 'event']
+        read_only_fields = ('atd_id',)
 
     # Use nested serializer for read
     def to_representation(self, instance):
@@ -71,7 +154,24 @@ class AttendanceSerializer(serializers.ModelSerializer):
         representation['event'] = EventsSerializer(instance.event).data
         return representation
 
+    def create(self, validated_data):
+        # Generate atd_id like ATD001, ATD002 ...
+        last_atd = Attendance.objects.order_by('atd_id').last()
+        if last_atd and last_atd.atd_id:
+            last_id_num = int(last_atd.atd_id.replace('ATD', ''))
+            new_id_num = last_id_num + 1
+        else:
+            new_id_num = 1
+
+        validated_data['atd_id'] = f"ATD{new_id_num:03d}"
+        return super().create(validated_data)
+
+
 class AttendanceFileSerializer(serializers.ModelSerializer):
+    event = serializers.PrimaryKeyRelatedField(queryset=Events.objects.all())
+    unit = serializers.PrimaryKeyRelatedField(queryset=Unit.objects.all())
+    
     class Meta:
         model = AttendanceFile  # Assuming AttendanceFile is a model related to Attendance
         fields = '__all__'
+        read_only_fields = ['file_id'] 

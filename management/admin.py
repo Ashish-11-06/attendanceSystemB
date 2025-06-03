@@ -1,8 +1,10 @@
 from django.contrib import admin
 
-from management.models import Admin, Attendance, AttendanceFile, Events, Location, Unit, Volunteer
+from management.models import Admin, Attendance, AttendanceFile, Events, Location, Register, Unit, Volunteer
 
 # Register your models here.
+
+admin.site.register(Register)
 admin.site.register(Events)
 admin.site.register(Unit)
 admin.site.register(Location)
