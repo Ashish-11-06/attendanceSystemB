@@ -388,6 +388,9 @@ class LocationCountAPIView(APIView):
     
 class DataFechEvenUnitIdAPIView(APIView):
     def post (self, request, unit=None, event=None):
+        unit = request.data.get('unit')
+        event = request.data.get('event')
+        
         if unit and event:
             # Get attendance for specific unit and event
             attendance = Attendance.objects.filter(unit__unit_id=unit, event__event_id=event)
