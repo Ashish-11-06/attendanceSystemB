@@ -80,7 +80,7 @@ class EventsSerializer(serializers.ModelSerializer):
         return rep
        
 class UnitSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
+    # password = serializers.CharField(write_only=True)
     class Meta:
         model = Unit # Assuming Unit is defined in management.models
         fields = '__all__'
