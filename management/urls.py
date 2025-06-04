@@ -1,7 +1,6 @@
 from django.urls import path
 
-
-from management.views import AdminAPIView, AttendanceAPIView, AttendanceFileAPIView, DataFechEvenUnitIdAPIView, EventsAPIView, EventsCountAPIView, LocationAPIView, LocationCountAPIView, LoginAPIView, RegisterAPIView, UnitAPIView, UnitCountAPIView, UploadVolunteerExcelView, VerifyOTPAPIView, VolunteerAPIView, VolunteerCountAPIVIew
+from management.views import AdminAPIView, AttendanceAPIView, AttendanceFileAPIView, DataFechEvenUnitIdAPIView, EventsAPIView, LocationAPIView, LoginAPIView, RegisterAPIView, TotalCountAPIView, UnitAPIView, UploadVolunteerExcelView, VerifyOTPAPIView, VolunteerAPIView
 
 urlpatterns = [
     path('register/', RegisterAPIView.as_view(), name='register-unit'),
@@ -11,19 +10,18 @@ urlpatterns = [
     
     
     
-    path('events/count/', EventsCountAPIView.as_view(), name='total-event-count'),
     path('events/', EventsAPIView.as_view(), name='events-api'),
     path('events/<str:event_id>/', EventsAPIView.as_view()),
     
-    path('locations/count/', LocationCountAPIView.as_view(), name='total-location-count'),
+    # path('locations/count/', LocationCountAPIView.as_view(), name='total-location-count'),
     path('locations/', LocationAPIView.as_view(), name='location-api'),
     path('locations/<str:location_id>/', LocationAPIView.as_view()),
     
-    path('units/count/', UnitCountAPIView.as_view(), name='total-unit-count'),
+    # path('units/count/', UnitCountAPIView.as_view(), name='total-unit-count'),
     path('units/', UnitAPIView.as_view(), name='unit-api'),
     path('units/<str:unit_id>/', UnitAPIView.as_view()),
     
-    path ('volinteers/count/', VolunteerCountAPIVIew.as_view(), name='total-volunteer-count'),
+    # path ('volinteers/count/', VolunteerCountAPIVIew.as_view(), name='total-volunteer-count'),
     path('volinteers/', VolunteerAPIView.as_view(), name='volunteer-api'),
     path('volinteers/<str:volunteer_id>/', VolunteerAPIView.as_view()),
     path('volinteers/upload-file/<str:unit_id>/', UploadVolunteerExcelView.as_view(), name='upload-file'), 
@@ -37,7 +35,11 @@ urlpatterns = [
     path('attendance-files/', AttendanceFileAPIView.as_view(), name='attendance-file-api'),
     path('attendance-file/<str:attendance_file_id>/', AttendanceFileAPIView.as_view()),
     
+     path('total-count/', TotalCountAPIView.as_view(), name='total-count-api'),
+    
     path ('event-unit-attendance/', DataFechEvenUnitIdAPIView.as_view(), name='event-unit-attendance-api'),
+    
+    
     
     
 ]

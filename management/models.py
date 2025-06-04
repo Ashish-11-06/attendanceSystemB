@@ -22,7 +22,10 @@ class Register(models.Model):
 class Events(models.Model):
     event_id = models.CharField(max_length=50)
     event_name = models.CharField(max_length=250)
-    location = models.ManyToManyField('management.Location', blank=True, related_name='events')
+    # location = models.ManyToManyField('management.Location', blank=True, related_name='events')
+    units = models.ManyToManyField('Unit', through='EventUnitLocation',  blank=True)
+    locations = models.ManyToManyField('Location', through='EventUnitLocation', blank=True)
+
     start_date = models.DateField()
     end_date = models.DateField(null=True, blank=True)
     time = models.TimeField()
@@ -44,9 +47,9 @@ class Unit(models.Model):
     unit_id = models.CharField(max_length=200)
     unit_name = models.CharField(max_length=250)
     password = models.CharField(max_length=250)   
-    plain_password = models.CharField(max_length=250, null=True, blank=True)
+    # plain_password = models.CharField(max_length=250, null=True, blank=True)
     email = models.EmailField(max_length=254, null=True, blank=True)
-    phone = models.IntegerField(null=True, blank=True)
+    phone = models.CharField(max_length=50, null=True, blank=True)
     location = models.CharField(max_length=255, null=True)
 
     
@@ -80,7 +83,7 @@ class Admin(models.Model):
     admin_id = models.CharField(max_length=200)
     name = models.CharField(max_length=250)
     email = models.EmailField(max_length=254, null=True, blank=True)
-    phone = models.IntegerField(null=True, blank=True)
+    phone = models.CharField(max_length=50, null=True, blank=True)
     password = models.CharField(max_length=250)
     user_type = models.CharField(max_length=20, null=True, default='admin')
     
@@ -137,6 +140,18 @@ class AttendanceFile(models.Model):
     
     class Meta:
         verbose_name_plural = "Attendance Files"
+        
+
+class EventUnitLocation(models.Model):
+    event = models.ForeignKey('management.Events', on_delete=models.CASCADE, null=True)
+    unit = models.ForeignKey('management.Unit', on_delete=models.CASCADE, null=True)
+    location = models.ForeignKey('management.Location', on_delete=models.CASCADE, null=True)
+    
+    def __str__(self):
+        return f"{self.event} - {self.unit} - {self.location} "
+    
+    class Meta:
+        verbose_name_plural = "Event Unit Locations"
     
 
 

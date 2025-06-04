@@ -8,8 +8,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from management.models import Admin, Attendance, AttendanceFile, Events, Location, Register, Unit, Volunteer
-from management.serializers import AdminSerializer, AttendanceFileSerializer, AttendanceSerializer, EventsSerializer, LocationSerializer, LoginSerializer, RegisterSerializer, UnitSerializer, VolunteerSerializer
+from management.models import Admin, Attendance, AttendanceFile, EventUnitLocation, Events, Location, Register, Unit, Volunteer
+from management.serializers import AdminSerializer, AttendanceFileSerializer, AttendanceSerializer, EventUnitLocationSerializer, EventsSerializer, LocationSerializer, LoginSerializer, RegisterSerializer, UnitSerializer, VolunteerSerializer
 from management.utils import send_otp_email
 
 class RegisterAPIView(APIView):
@@ -231,44 +231,73 @@ class UploadVolunteerExcelView(APIView):
 class EventsAPIView(APIView):
     def get(self, request, event_id=None):
         if event_id:
-            # Get single event by id
-            event = get_object_or_404(Events, event_id=event_id)
+            # Get single event by event_id (not pk)
+            try:
+                event = Events.objects.get(event_id=event_id)
+            except Events.DoesNotExist:
+                return Response({"error": "Event not found."}, status=status.HTTP_404_NOT_FOUND)
+            
             serializer = EventsSerializer(event)
             return Response(serializer.data, status=status.HTTP_200_OK)
-        else:
-            # Get all events
-            events = Events.objects.all()
-            serializer = EventsSerializer(events, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        
+
+        # Get all events, ordered by most recent
+        events = Events.objects.all().order_by('-created_at')
+        serializer = EventsSerializer(events, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
     def post(self, request):
-        serializer = EventsSerializer(data=request.data)
+        unit_id = request.data.get('unit')
+        location_ids = request.data.get('location', [])
+
+        # Prepare event data for EventsSerializer (remove unit only)
+        event_data = request.data.copy()
+        event_data.pop('unit', None)
+
+        serializer = EventsSerializer(data=event_data)
         if serializer.is_valid():
-            serializer.save()  # event_id generated inside serializer
+            event = serializer.save()
+
+            # Save EventUnitLocation only if both unit and locations are provided
+            if unit_id and location_ids:
+                try:
+                    unit = Unit.objects.get(id=unit_id)
+                    for loc_id in location_ids:
+                        location = Location.objects.get(id=loc_id)
+                        EventUnitLocation.objects.create(
+                            event=event,
+                            unit=unit,
+                            location=location
+                        )
+                except Unit.DoesNotExist:
+                    return Response({"error": "Invalid unit ID."}, status=status.HTTP_400_BAD_REQUEST)
+                except Location.DoesNotExist:
+                    return Response({"error": f"Invalid location ID: {loc_id}"}, status=status.HTTP_400_BAD_REQUEST)
+
             return Response(
                 {"message": "Event added successfully!", "data": serializer.data},
                 status=status.HTTP_201_CREATED
             )
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+
     def put(self, request, event_id=None):
         if not event_id:
-            return Response({"error": "ID is required for update."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "event_id is required in URL."}, status=status.HTTP_400_BAD_REQUEST)
 
         event = get_object_or_404(Events, event_id=event_id)
         serializer = EventsSerializer(event, data=request.data)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
+            return Response({"message": "Event updated successfully!", "data": serializer.data})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+
     def delete(self, request, event_id=None):
         if not event_id:
             return Response({"error": "event_id is required in URL."}, status=status.HTTP_400_BAD_REQUEST)
         event = get_object_or_404(Events, event_id=event_id)
         event.delete()
-        return Response({"message": "Unit deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
-    
+        return Response({"message": "Event deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+  
     
     
 class LocationAPIView(APIView):
@@ -328,12 +357,12 @@ class UnitAPIView(APIView):
             return Response({"message": "Unit created successfully", "data": serializer.data}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def put(self, request):
-        unit_id = request.data.get('unit_id')  # Ensure the ID is passed in request body
+    def put(self, request, unit_id=None):
+        # unit_id = request.data.get('unit_id')  
         if not unit_id:
             return Response({"error": "ID is required for update."}, status=status.HTTP_400_BAD_REQUEST)
         
-        unit = get_object_or_404(Unit, unitId=unit_id)
+        unit = get_object_or_404(Unit, unit_id=unit_id)
         
         data = request.data.copy()  
         if 'password' in data:
@@ -486,25 +515,28 @@ class AttendanceFileAPIView(APIView):
             return Response({"message": "File uploaded successfully", "data": serializer.data}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-class EventsCountAPIView(APIView):
+class TotalCountAPIView(APIView):
     def get(self, request):
             total = Events.objects.count()
-            return Response({"total_events": total}, status=status.HTTP_200_OK)
+            total = Volunteer.objects.count()
+            total = Unit.objects.count()
+            total = Location.objects.count()
+            return Response({"total_events": total, "total_volunteers": total, "total_units": total, "total_locations": total}, status=status.HTTP_200_OK)
         
-class VolunteerCountAPIVIew(APIView):
-    def get(self, request):
-        total = Volunteer.objects.count()
-        return Response({"total_volunteers": total}, status=status.HTTP_200_OK)
+# class VolunteerCountAPIVIew(APIView):
+#     def get(self, request):
+#         total = Volunteer.objects.count()
+#         return Response({"total_volunteers": total}, status=status.HTTP_200_OK)
     
-class UnitCountAPIView(APIView):
-    def get(self, request):
-        total = Unit.objects.count()
-        return Response({"total_units": total}, status=status.HTTP_200_OK)
+# class UnitCountAPIView(APIView):
+#     def get(self, request):
+#         total = Unit.objects.count()
+#         return Response({"total_units": total}, status=status.HTTP_200_OK)
     
-class LocationCountAPIView(APIView):
-    def get(self, request):
-        total = Location.objects.count()
-        return Response({"total_locations": total}, status=status.HTTP_200_OK)  
+# class LocationCountAPIView(APIView):
+#     def get(self, request):
+#         total = Location.objects.count()
+#         return Response({"total_locations": total}, status=status.HTTP_200_OK)  
     
     
 class DataFechEvenUnitIdAPIView(APIView):
@@ -514,8 +546,21 @@ class DataFechEvenUnitIdAPIView(APIView):
         
         if unit and event:
             # Get attendance for specific unit and event
-            attendance = Attendance.objects.filter(unit__unit_id=unit, event__event_id=event)
+            attendance = Attendance.objects.filter(unit_id=unit, event_id=event)
             serializer = AttendanceSerializer(attendance, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
         else:
             return Response({"error": "unit_id and event_id are required."}, status=status.HTTP_400_BAD_REQUEST) 
+        
+class EventUnitLocationAPIView(APIView):
+    def get(self, request):
+        locations = EventUnitLocation.objects.all()
+        serializer = EventUnitLocationSerializer(locations, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    # def post(self, request):
+    #     serializer = EventUnitLocationSerializer(data=request.data)
+    #     if serializer.is_valid():
+    #         serializer.save()
+    #         return Response({"message": "Event-Unit-Location created successfully", "data": serializer.data}, status=status.HTTP_201_CREATED)
+    #     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
