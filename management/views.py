@@ -1,5 +1,12 @@
+import io
+import mimetypes
+import os
 import random
 import sys
+import uuid
+from wsgiref.util import FileWrapper 
+import zipfile
+from django.http import FileResponse, StreamingHttpResponse
 import openpyxl
 from django.shortcuts import get_object_or_404, render
 from django.contrib.auth.hashers import make_password, check_password
@@ -231,55 +238,133 @@ class UploadVolunteerExcelView(APIView):
 class EventsAPIView(APIView):
     def get(self, request, event_id=None):
         if event_id:
-            # Get single event by event_id (not pk)
-            try:
-                event = Events.objects.get(event_id=event_id)
-            except Events.DoesNotExist:
-                return Response({"error": "Event not found."}, status=status.HTTP_404_NOT_FOUND)
-            
-            serializer = EventsSerializer(event)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            events = Events.objects.filter(event_id=event_id)
+        else:
+            events = Events.objects.all().order_by('-created_at')
 
-        # Get all events, ordered by most recent
-        events = Events.objects.all().order_by('-created_at')
-        serializer = EventsSerializer(events, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        result = []
+
+        for event in events:
+            event_data = {
+                "id":event.id,
+                "event_id": event.event_id,
+                "event_name": event.event_name,
+                "start_date": event.start_date,
+                "end_date": event.end_date,
+                "time": event.time,
+                "locations": []
+            }
+
+            event_locations = EventUnitLocation.objects.filter(event=event)
+
+            location_map = {}
+
+            for entry in event_locations:
+                if not entry.unit or not entry.location:
+                    continue
+
+                loc_id = entry.location.id
+                if loc_id not in location_map:
+                    location_map[loc_id] = {
+                        "location_id": entry.location.id,
+                        "location_name": entry.location.city,  # Assuming `name` field in Location
+                        "units": []
+                    }
+
+                unit_data = {
+                    "unit_id": entry.unit.unit_id,
+                    "unit_name": entry.unit.unit_name,
+                    "email": entry.unit.email,
+                    "phone": entry.unit.phone,
+                    "location": entry.unit.location
+                }
+
+                location_map[loc_id]["units"].append(unit_data)
+
+            event_data["locations"] = list(location_map.values())
+            result.append(event_data)
+
+        return Response(result, status=200)
+
 
     def post(self, request):
-        unit_id = request.data.get('unit')
-        location_ids = request.data.get('location', [])
+        data = request.data.copy()
 
-        # Prepare event data for EventsSerializer (remove unit only)
-        event_data = request.data.copy()
-        event_data.pop('unit', None)
+        # Generate unique event_id
+        event_id = str(uuid.uuid4())[:8]
+        data['event_id'] = event_id
 
-        serializer = EventsSerializer(data=event_data)
+        # Extract locations with units
+        locations_data = data.pop("locations", [])
+
+        # Serialize and save event
+        serializer = EventsSerializer(data=data)
         if serializer.is_valid():
             event = serializer.save()
 
-            # Save EventUnitLocation only if both unit and locations are provided
-            if unit_id and location_ids:
+            # Save EventUnitLocation entries
+            for loc in locations_data:
+                location_id = loc.get("location_id")
+                unit_ids = loc.get("unit", [])
                 try:
-                    unit = Unit.objects.get(id=unit_id)
-                    for loc_id in location_ids:
-                        location = Location.objects.get(id=loc_id)
+                    location = Location.objects.get(id=location_id)
+                    for unit_id in unit_ids:
+                        unit = Unit.objects.get(id=unit_id)
                         EventUnitLocation.objects.create(
                             event=event,
-                            unit=unit,
-                            location=location
+                            location=location,
+                            unit=unit
                         )
-                except Unit.DoesNotExist:
-                    return Response({"error": "Invalid unit ID."}, status=status.HTTP_400_BAD_REQUEST)
                 except Location.DoesNotExist:
-                    return Response({"error": f"Invalid location ID: {loc_id}"}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({"error": f"Location ID {location_id} not found."}, status=400)
+                except Unit.DoesNotExist:
+                    return Response({"error": f"Unit ID {unit_id} not found."}, status=400)
 
-            return Response(
-                {"message": "Event added successfully!", "data": serializer.data},
-                status=status.HTTP_201_CREATED
-            )
+            # Prepare full response
+            response_data = {
+                "id": event.id,
+                "event_id": event.event_id,
+                "event_name": event.event_name,
+                "start_date": event.start_date,
+                "end_date": event.end_date,
+                "time": event.time,
+                "locations": []
+            }
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            # Fetch full details from EventUnitLocation
+            event_locations = EventUnitLocation.objects.filter(event=event)
+            location_map = {}
 
+            for entry in event_locations:
+                if not entry.unit or not entry.location:
+                    continue
+
+                loc_id = entry.location.id
+                if loc_id not in location_map:
+                    location_map[loc_id] = {
+                        "location_id": loc_id,
+                        "location_name": entry.location.city,  # assuming field name
+                        "units": []
+                    }
+
+                unit = entry.unit
+                location_map[loc_id]["units"].append({
+                    "unit_id": unit.id,
+                    "unit_name": unit.unit_name,
+                    "email": unit.email,
+                    "phone": unit.phone,
+                    "location": unit.location
+                })
+
+            response_data["locations"] = list(location_map.values())
+
+            return Response({
+                "message": "Event created successfully!",
+                "data": response_data
+            }, status=201)
+
+        return Response(serializer.errors, status=400)
+    
     def put(self, request, event_id=None):
         if not event_id:
             return Response({"error": "event_id is required in URL."}, status=status.HTTP_400_BAD_REQUEST)
@@ -504,7 +589,16 @@ class AttendanceAPIView(APIView):
 
 class AttendanceFileAPIView(APIView):
     def get(self, request):
+        event_id = request.query_params.get('event')
+        unit_id = request.query_params.get('unit')
+
         files = AttendanceFile.objects.all()
+
+        if event_id:
+            files = files.filter(event_id=event_id)  # assuming event is a ForeignKey named event
+        if unit_id:
+            files = files.filter(unit_id=unit_id)    # assuming unit is a ForeignKey named unit
+
         serializer = AttendanceFileSerializer(files, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -517,12 +611,18 @@ class AttendanceFileAPIView(APIView):
     
 class TotalCountAPIView(APIView):
     def get(self, request):
-            total = Events.objects.count()
-            total = Volunteer.objects.count()
-            total = Unit.objects.count()
-            total = Location.objects.count()
-            return Response({"total_events": total, "total_volunteers": total, "total_units": total, "total_locations": total}, status=status.HTTP_200_OK)
-        
+        total_events = Events.objects.count()
+        total_volunteers = Volunteer.objects.count()
+        total_units = Unit.objects.count()
+        total_locations = Location.objects.count()
+
+        return Response({
+            "total_events": total_events,
+            "total_volunteers": total_volunteers,
+            "total_units": total_units,
+            "total_locations": total_locations
+        }, status=status.HTTP_200_OK)
+
 # class VolunteerCountAPIVIew(APIView):
 #     def get(self, request):
 #         total = Volunteer.objects.count()
@@ -564,3 +664,45 @@ class EventUnitLocationAPIView(APIView):
     #         serializer.save()
     #         return Response({"message": "Event-Unit-Location created successfully", "data": serializer.data}, status=status.HTTP_201_CREATED)
     #     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+class AttendanceFileDownloadAPIView(APIView):
+    def post(self, request):
+        event_id = request.data.get('event')
+        unit_id = request.data.get('unit')
+
+        if not event_id or not unit_id:
+            return Response({"error": "Event and Unit are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        attendance_file = AttendanceFile.objects.filter(event_id=event_id, unit_id=unit_id).first()
+
+        if not attendance_file:
+            return Response({"error": "No file found."}, status=status.HTTP_404_NOT_FOUND)
+
+        file_path = attendance_file.file.path
+
+        if not os.path.exists(file_path):
+            return Response({"error": "File not found on disk."}, status=status.HTTP_404_NOT_FOUND)
+
+        wrapper = FileWrapper(open(file_path, 'rb'))
+        file_name = os.path.basename(file_path)
+
+        response = FileResponse(wrapper, content_type='application/octet-stream')
+        response['Content-Disposition'] = f'attachment; filename="{file_name}"'
+        return response
+    
+      
+class VolunteersByUnitPostAPIView(APIView):
+    def post(self, request):
+        unit_id = request.data.get("unit")
+
+        if not unit_id:
+            return Response({"error": "Unit ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Use `unit_id=unit_id` to filter by ForeignKey properly
+        volunteers = Volunteer.objects.filter(unit_id=unit_id)
+
+        if not volunteers.exists():
+            return Response({"message": "No volunteers found for this unit."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = VolunteerSerializer(volunteers, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

@@ -126,6 +126,7 @@ class AttendanceFile(models.Model):
     file = models.FileField(upload_to='attendance_files/')
     event = models.ForeignKey('management.Events', on_delete=models.CASCADE, null=True)
     unit = models.ForeignKey('management.Unit', on_delete=models.CASCADE)
+    
     uploaded_at = models.DateTimeField(auto_now_add=True)
     
     def save(self, *args, **kwargs):
