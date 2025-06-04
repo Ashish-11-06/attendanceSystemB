@@ -1,7 +1,7 @@
 from django.urls import path
 
 
-from management.views import AdminAPIView, AttendanceAPIView, AttendanceFileAPIView, EventsAPIView, EventsCountAPIView, LocationAPIView, LocationCountAPIView, LoginAPIView, RegisterAPIView, UnitAPIView, UnitCountAPIView, VerifyOTPAPIView, VolunteerAPIView, VolunteerCountAPIVIew
+from management.views import AdminAPIView, AttendanceAPIView, AttendanceFileAPIView, DataFechEvenUnitIdAPIView, EventsAPIView, EventsCountAPIView, LocationAPIView, LocationCountAPIView, LoginAPIView, RegisterAPIView, UnitAPIView, UnitCountAPIView, VerifyOTPAPIView, VolunteerAPIView, VolunteerCountAPIVIew
 
 urlpatterns = [
     path('register/', RegisterAPIView.as_view(), name='register-unit'),
@@ -33,6 +33,8 @@ urlpatterns = [
     
     path('attendance-files/', AttendanceFileAPIView.as_view(), name='attendance-file-api'),
     path('attendance-file/<str:attendance_file_id>/', AttendanceFileAPIView.as_view()),
+    
+    path ('event-unit-attendance/', DataFechEvenUnitIdAPIView.as_view(), name='event-unit-attendance-api'),
     
     
 ]

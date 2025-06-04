@@ -383,4 +383,15 @@ class UnitCountAPIView(APIView):
 class LocationCountAPIView(APIView):
     def get(self, request):
         total = Location.objects.count()
-        return Response({"total_locations": total}, status=status.HTTP_200_OK)   
+        return Response({"total_locations": total}, status=status.HTTP_200_OK)  
+    
+    
+class DataFechEvenUnitIdAPIView(APIView):
+    def post (self, request, unit=None, event=None):
+        if unit and event:
+            # Get attendance for specific unit and event
+            attendance = Attendance.objects.filter(unit__unit_id=unit, event__event_id=event)
+            serializer = AttendanceSerializer(attendance, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        else:
+            return Response({"error": "unit_id and event_id are required."}, status=status.HTTP_400_BAD_REQUEST) 
