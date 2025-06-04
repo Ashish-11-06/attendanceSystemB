@@ -1,4 +1,6 @@
 import random
+import sys
+import openpyxl
 from django.shortcuts import get_object_or_404, render
 from django.contrib.auth.hashers import make_password, check_password
 
@@ -107,6 +109,125 @@ class LoginAPIView(APIView):
         return Response({"error": "Invalid user_type"}, status=status.HTTP_400_BAD_REQUEST) 
     
     
+    # Ashish --
+    
+class UploadVolunteerExcelView(APIView):
+    def post(self, request, unit_id):
+        file = request.FILES.get('file')
+        if not file:
+            return Response({'error': 'No file uploaded'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Use the unit_id from the URL directly
+        try:
+            unit_from_url = Unit.objects.get(id=unit_id)
+        except Unit.DoesNotExist:
+            return Response({'error': f"Unit ID {unit_id} not found"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            wb = openpyxl.load_workbook(file)
+            inserted = {}
+
+            for sheet in wb.worksheets:
+                sheet_name = sheet.title.strip().lower()
+                count = 0
+
+                # Detect gender and registration status based on sheet name
+                gender = None
+                is_registered = True
+
+                if sheet_name == 'gents':
+                    gender = 'Male'
+                elif sheet_name == 'ladies':
+                    gender = 'Female'
+                elif sheet_name == 'un-reg gents':
+                    gender = 'Male'
+                    is_registered = False
+                elif sheet_name == 'un-reg ladies':
+                    gender = 'Female'
+                    is_registered = False
+
+                # Step 1: Get headers from row 3
+                raw_headers = [str(cell.value).strip().lower() if cell.value else '' for cell in sheet[3]]
+
+                # Normalize column_map keys to lowercase too
+                column_map = {
+                    'new p#': 'new_personal_number',
+                    'old p#': 'old_personal_number',
+                    'name': 'name',
+                    'contact no.': 'phone',
+                    'email': 'email',
+                    'volunteer id': 'volunteer_id',
+                    'unit id': 'unit_id',
+                    's#': 's_number'  # Add S# to the column map
+                }
+
+                # Map column index to model field using normalized header
+                header_field_map = {}
+                for idx, header in enumerate(raw_headers):
+                    field = column_map.get(header)
+                    if field:
+                        header_field_map[idx] = field
+
+                # print("Header field map:", header_field_map)
+
+                for row in sheet.iter_rows(min_row=4, values_only=True):
+                    if not any(row):
+                        continue
+
+                    row_data = {}
+                    for idx, value in enumerate(row):
+                        field_name = header_field_map.get(idx)
+                        if field_name:
+                            row_data[field_name] = value
+
+                    # Check if S# is 'X' and skip the row if it is
+                    s_number = row_data.get('s_number')
+                    if s_number == 'X':
+                        print("Skipping row due to S# being 'X'")
+                        continue  # Skip this row if S# is 'X'
+
+                    # Clean and validate data
+                    name = row_data.get('name', '').strip()
+
+                    if not name:
+                        # print("Skipping row due to empty name")
+                        continue  # Skip this row if name is empty
+
+                    # Determine unit instance
+                    unit = unit_from_url  # Use the unit from the URL directly
+                    unit_id_in_row = row_data.get('unit_id')
+                    if unit_id_in_row:
+                        try:
+                            unit = Unit.objects.get(id=unit_id_in_row)
+                        except Unit.DoesNotExist:
+                            print(f"Unit ID {unit_id_in_row} not found, using default unit")
+
+                    data = {
+                        'name': name,
+                        'email': row_data.get('email'),
+                        'phone': row_data.get('phone'),
+                        'old_personal_number': row_data.get('old_personal_number'),
+                        'new_personal_number': row_data.get('new_personal_number'),
+                        'gender': gender,  # Use the gender determined by the sheet name
+                        'unit': unit.id if unit else None,
+                        'is_registered': is_registered,
+                    }
+
+                    # print("Row data passed to serializer:", data)
+                    serializer = VolunteerSerializer(data=data)
+                    if serializer.is_valid():
+                        serializer.save()
+                        count += 1
+                    else:
+                        print(f"Validation errors: {serializer.errors}")
+
+                inserted[sheet.title] = f"{count} rows imported"
+
+            return Response({'message': 'Import successful', 'details': inserted}, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class EventsAPIView(APIView):
     def get(self, request, event_id=None):
         if event_id:

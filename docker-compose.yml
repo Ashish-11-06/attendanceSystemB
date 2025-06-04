@@ -1,0 +1,13 @@
+version: '3'
+
+services:
+  web:
+    build: .
+    volumes:
+      - .:/app  # live reload
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+    env_file:
+      - .env
