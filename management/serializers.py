@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Admin, Attendance, AttendanceFile, Events, Location, Register, Unit, Volunteer
+from .models import Admin, Attendance, AttendanceFile, EventUnitLocation, Events, Location, Register, Unit, Volunteer
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -44,20 +44,22 @@ class LocationSerializer(serializers.ModelSerializer):
 #         fields = ['id', 'eventId', 'event_name', 'date', 'time','location', 'created_at']
         
 class EventsSerializer(serializers.ModelSerializer):
-    # Accept multiple location IDs
-    location = serializers.PrimaryKeyRelatedField(
-        many=True,
-        queryset=Location.objects.all()
+    locations = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=Location.objects.all(), required=False 
+    )
+    units = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=Unit.objects.all(), required=False 
     )
 
     class Meta:
         model = Events
-        fields = ['id', 'event_id', 'event_name', 'start_date', 'end_date', 'time', 'location', 'created_at']
+        fields = ['id', 'event_id', 'event_name', 'start_date', 'end_date', 'time', 'locations', 'units', 'created_at']
         read_only_fields = ('event_id',)
 
     def create(self, validated_data):
-        locations = validated_data.pop('location', [])
-        # Generate event_id like EVE001, EVE002 ...
+        locations = validated_data.pop('locations', [])
+        units = validated_data.pop('units', [])
+
         last_event = Events.objects.order_by('event_id').last()
         if last_event:
             last_id_num = int(last_event.event_id.replace('EVE', ''))
@@ -67,25 +69,18 @@ class EventsSerializer(serializers.ModelSerializer):
 
         validated_data['event_id'] = f"EVE{new_id_num:03d}"
         event = Events.objects.create(**validated_data)
-        event.location.set(locations)
+        event.locations.set(locations)
+        event.units.set(units)
         return event
 
-    def update(self, instance, validated_data):
-        locations = validated_data.pop('location', None)
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-        if locations is not None:
-            instance.location.set(locations)
-        return instance
-
     def to_representation(self, instance):
-        representation = super().to_representation(instance)
-        representation['location'] = LocationSerializer(instance.location.all(), many=True).data
-        return representation
-         
+        rep = super().to_representation(instance)
+        rep['locations'] = LocationSerializer(instance.locations.all(), many=True).data
+        rep['units'] = UnitSerializer(instance.units.all(), many=True).data
+        return rep
+       
 class UnitSerializer(serializers.ModelSerializer):
-    # password = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True)
     class Meta:
         model = Unit # Assuming Unit is defined in management.models
         fields = '__all__'
@@ -176,3 +171,13 @@ class AttendanceFileSerializer(serializers.ModelSerializer):
         model = AttendanceFile  # Assuming AttendanceFile is a model related to Attendance
         fields = '__all__'
         read_only_fields = ['file_id'] 
+        
+class EventUnitLocationSerializer(serializers.ModelSerializer):
+    event = serializers.PrimaryKeyRelatedField(queryset=Events.objects.all())
+    unit = serializers.PrimaryKeyRelatedField(queryset=Unit.objects.all())
+    location = serializers.PrimaryKeyRelatedField(queryset=Location.objects.all())
+
+    class Meta:
+        model = EventUnitLocation  # Assuming EventUnitLocation is a model related to Events, Unit, and Location
+        fields = ['id', 'event', 'unit', 'location']
+        read_only_fields = ['id']  # Assuming id is auto-generated
