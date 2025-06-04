@@ -442,12 +442,18 @@ class UnitAPIView(APIView):
             return Response({"message": "Unit created successfully", "data": serializer.data}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def put(self, request, unit_id=None):
-        # unit_id = request.data.get('unit_id')  
+    def put(self, request, unit_id):
+        # print("Received request data for update:", request.data)
         if not unit_id:
-            return Response({"error": "ID is required for update."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Unit ID is required."}, status=status.HTTP_400_BAD_REQUEST)
         
-        unit = get_object_or_404(Unit, unit_id=unit_id)
+        try:
+            unit = Unit.objects.get(id=unit_id)  # Or `id=unit_id` if you're using PK
+        except Unit.DoesNotExist:
+            return Response({"error": "No Unit matches the given ID."}, status=status.HTTP_404_NOT_FOUND)
+    
+        unit = get_object_or_404(Unit, id=unit_id)
+        # print("Found unit for update:", unit)
         
         data = request.data.copy()  
         if 'password' in data:
@@ -603,6 +609,7 @@ class AttendanceFileAPIView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def post(self, request):
+        # print('hello')
         serializer = AttendanceFileSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()

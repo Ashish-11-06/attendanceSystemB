@@ -102,7 +102,7 @@ class Attendance(models.Model):
     event = models.ForeignKey('management.Events', on_delete=models.CASCADE, null=True)
     unit = models.ForeignKey('management.Unit', on_delete=models.CASCADE, null=True)
     date = models.DateField()
-    in_time = models.TimeField()
+    in_time = models.TimeField(null=True, blank=True)
     out_time = models.TimeField(null=True, blank=True)
     present = models.BooleanField(default=False)
     absent = models.BooleanField(default=False)
