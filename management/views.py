@@ -3,11 +3,17 @@ import mimetypes
 import os
 import random
 import sys
+import tempfile
+from tkinter import Image
 import uuid
 from wsgiref.util import FileWrapper 
 import zipfile
 from django.http import FileResponse, StreamingHttpResponse
 import openpyxl
+from pdf2image import convert_from_path
+import pytesseract
+import imghdr
+import cv2
 from django.shortcuts import get_object_or_404, render
 from django.contrib.auth.hashers import make_password, check_password
 
@@ -17,7 +23,7 @@ from rest_framework import status
 
 from management.models import Admin, Attendance, AttendanceFile, EventUnitLocation, Events, Location, Register, Unit, Volunteer
 from management.serializers import AdminSerializer, AttendanceFileSerializer, AttendanceSerializer, EventUnitLocationSerializer, EventsSerializer, LocationSerializer, LoginSerializer, RegisterSerializer, UnitSerializer, VolunteerSerializer
-from management.utils import send_otp_email
+from management.utils import extract_table_data_from_image, parse_ocr_lines_to_table,  send_otp_email
 
 class RegisterAPIView(APIView):
     def post(self, request):
@@ -531,12 +537,13 @@ class AdminAPIView(APIView):
         if not admin_id:
             return Response({"error": "ID is required for update."}, status=status.HTTP_400_BAD_REQUEST)
 
-        admin = get_object_or_404(Admin, admin_id=admin_id)
+        admin = get_object_or_404(Admin, id=admin_id)
         serializer = AdminSerializer(admin, data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
     
 class AttendanceAPIView(APIView):
@@ -674,30 +681,48 @@ class EventUnitLocationAPIView(APIView):
     
 class AttendanceFileDownloadAPIView(APIView):
     def post(self, request):
-        event_id = request.data.get('event')
-        unit_id = request.data.get('unit')
+        try:
+            event_id = request.data.get('event')
+            unit_id = request.data.get('unit')
 
-        if not event_id or not unit_id:
-            return Response({"error": "Event and Unit are required."}, status=status.HTTP_400_BAD_REQUEST)
+            if not event_id or not unit_id:
+                return Response({"error": "Missing event/unit ID"}, status=status.HTTP_400_BAD_REQUEST)
 
-        attendance_file = AttendanceFile.objects.filter(event_id=event_id, unit_id=unit_id).first()
+            attendance_file = AttendanceFile.objects.get(event__id=event_id, unit__id=unit_id)
+            file_path = attendance_file.file.path
 
-        if not attendance_file:
-            return Response({"error": "No file found."}, status=status.HTTP_404_NOT_FOUND)
+            if not os.path.exists(file_path):
+                return Response({"error": "File not found on server"}, status=status.HTTP_404_NOT_FOUND)
 
-        file_path = attendance_file.file.path
+            filename = os.path.basename(file_path)
+            file_ext = os.path.splitext(filename)[1].lower()
 
-        if not os.path.exists(file_path):
-            return Response({"error": "File not found on disk."}, status=status.HTTP_404_NOT_FOUND)
+            content_types = {
+                '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                '.xls': 'application/vnd.ms-excel',
+                '.pdf': 'application/pdf',
+                '.csv': 'text/csv',
+                '.txt': 'text/plain',
+                '.doc': 'application/msword',
+                '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.png': 'image/png',
+            }
 
-        wrapper = FileWrapper(open(file_path, 'rb'))
-        file_name = os.path.basename(file_path)
+            content_type = content_types.get(file_ext, 'application/octet-stream')
 
-        response = FileResponse(wrapper, content_type='application/octet-stream')
-        response['Content-Disposition'] = f'attachment; filename="{file_name}"'
-        return response
-    
-      
+            file = open(file_path, 'rb')
+            response = FileResponse(file, content_type=content_type)
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            response['Cache-Control'] = 'no-store'
+
+            return response
+
+        except AttendanceFile.DoesNotExist:
+            return Response({"error": "File record not found"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)     
 class VolunteersByUnitPostAPIView(APIView):
     def post(self, request):
         unit_id = request.data.get("unit")
@@ -713,3 +738,96 @@ class VolunteersByUnitPostAPIView(APIView):
 
         serializer = VolunteerSerializer(volunteers, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+
+# class UploadVolunteerImageStatsView(APIView):
+#     def post(self, request):
+#         upload = request.FILES.get('file')
+#         if not upload:
+#             return Response({'error': 'No file uploaded'}, status=status.HTTP_400_BAD_REQUEST)
+
+#         ext = upload.name.split('.')[-1].lower()
+#         if ext not in ['pdf', 'png', 'jpg', 'jpeg', 'bmp']:
+#             return Response({'error': 'Invalid file format. Only PDF, PNG, JPG, JPEG, BMP allowed.'},
+#                             status=status.HTTP_400_BAD_REQUEST)
+
+#         try:
+#             # Save uploaded file temporarily
+#             with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as temp_file:
+#                 for chunk in upload.chunks():
+#                     temp_file.write(chunk)
+#                 temp_path = temp_file.name
+
+#             all_stats = []
+
+#             if ext == 'pdf':
+#                 # Convert PDF pages to images
+#                 images = convert_from_path(temp_path, poppler_path=r'D:\\Prushal\\poppler-24.08.0\\Library\\bin')
+
+#                 for img in images:  
+#                     with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as img_file:
+#                         img.save(img_file.name, 'PNG')
+#                         text = extract_table_data_from_image(img_file.name)
+#                         stats = parse_ocr_output_to_counts(text)
+#                         all_stats.extend(stats)
+#                         os.remove(img_file.name)
+
+#             else:
+#                 # For image files
+#                 image = cv2.imread(temp_path)
+#                 if image is None:
+#                     os.remove(temp_path)
+#                     return Response({'error': 'OpenCV failed to read the image.'}, status=status.HTTP_400_BAD_REQUEST)
+#                 text = extract_table_data_from_image(temp_path)
+#                 all_stats = parse_ocr_output_to_counts(text)
+
+#             os.remove(temp_path)
+#             return Response({'data': all_stats}, status=status.HTTP_200_OK)
+
+#         except Exception as e:
+#             if 'temp_path' in locals() and os.path.exists(temp_path):
+#                 os.remove(temp_path)
+#             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class UploadFileExtractTextAPIView(APIView):
+    def post(self, request):
+        uploaded_file = request.FILES.get('file')
+
+        if not uploaded_file:
+            return Response({'error': 'No file uploaded.'}, status=400)
+
+        try:
+            ext = uploaded_file.name.split('.')[-1].lower()
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as temp_file:
+                for chunk in uploaded_file.chunks():
+                    temp_file.write(chunk)
+                temp_path = temp_file.name
+
+            all_text = []
+
+            if ext == "pdf":
+                # Convert PDF to images
+                images = convert_from_path(temp_path, poppler_path=r"D:\Prushal\poppler-24.08.0\Library\bin")
+                for image in images:
+                    text = pytesseract.image_to_string(image, config="--psm 6")
+                    lines = [line.strip() for line in text.split('\n') if line.strip()]
+                    all_text.extend(lines)
+
+            elif ext in ["png", "jpg", "jpeg"]:
+                image = Image.open(temp_path)
+                text = pytesseract.image_to_string(image, config="--psm 6")
+                lines = [line.strip() for line in text.split('\n') if line.strip()]
+                all_text.extend(lines)
+
+            else:
+                return Response({"error": "Unsupported file format."}, status=400)
+
+            os.remove(temp_path)
+
+            structured_data = parse_ocr_lines_to_table(all_text)
+            return Response({"data": structured_data}, status=200)
+
+
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
