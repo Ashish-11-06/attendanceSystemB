@@ -5,6 +5,8 @@ import random
 import sys
 import tempfile
 from tkinter import Image
+# from turtle import pd
+import pandas as pd 
 import uuid
 from wsgiref.util import FileWrapper 
 import zipfile
@@ -23,7 +25,7 @@ from rest_framework import status
 
 from management.models import Admin, Attendance, AttendanceFile, EventUnitLocation, Events, Location, Register, Unit, Volunteer
 from management.serializers import AdminSerializer, AttendanceFileSerializer, AttendanceSerializer, EventUnitLocationSerializer, EventsSerializer, LocationSerializer, LoginSerializer, RegisterSerializer, UnitSerializer, VolunteerSerializer
-from management.utils import extract_table_data_from_image, parse_ocr_lines_to_table,  send_otp_email
+from management.utils import extract_table_data_from_image, parse_sewadal_adhikari_data,  send_otp_email
 
 class RegisterAPIView(APIView):
     def post(self, request):
@@ -783,6 +785,8 @@ class VolunteersByUnitPostAPIView(APIView):
 #             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class UploadFileExtractTextAPIView(APIView):
+    
+    
     def post(self, request):
         uploaded_file = request.FILES.get('file')
 
@@ -800,7 +804,6 @@ class UploadFileExtractTextAPIView(APIView):
             all_text = []
 
             if ext == "pdf":
-                # Convert PDF to images
                 images = convert_from_path(temp_path, poppler_path=r"D:\Prushal\poppler-24.08.0\Library\bin")
                 for image in images:
                     text = pytesseract.image_to_string(image, config="--psm 6")
@@ -813,14 +816,26 @@ class UploadFileExtractTextAPIView(APIView):
                 lines = [line.strip() for line in text.split('\n') if line.strip()]
                 all_text.extend(lines)
 
+            elif ext in ["xlsx", "xls"]:
+                df = pd.read_excel(temp_path)
+                for _, row in df.iterrows():
+                    row_values = [str(val) for val in row.tolist()]
+                    all_text.append(" ".join(row_values))
+
             else:
                 return Response({"error": "Unsupported file format."}, status=400)
 
             os.remove(temp_path)
 
-            structured_data = parse_ocr_lines_to_table(all_text)
-            return Response({"data": structured_data}, status=200)
+            # Parse lines into structured table only for PDF/Image OCR text
+            if ext in ["pdf", "png", "jpg", "jpeg"]:
+                structured_data = parse_sewadal_adhikari_data(all_text)
 
+
+                return Response({"data": structured_data}, status=200)
+
+            # For Excel: show extracted rows as-is
+            return Response({"data": all_text}, status=200)
 
         except Exception as e:
             return Response({"error": str(e)}, status=500)
