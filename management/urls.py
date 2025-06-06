@@ -1,6 +1,6 @@
 from django.urls import path
 
-from management.views import AdminAPIView, AttendanceAPIView, AttendanceFileAPIView, AttendanceFileDownloadAPIView, DataFechEvenUnitIdAPIView, EventsAPIView, LocationAPIView, LoginAPIView, RegisterAPIView, TotalCountAPIView, UnitAPIView, UploadFileExtractTextAPIView, UploadVolunteerExcelView, VerifyOTPAPIView, VolunteerAPIView, VolunteersByUnitPostAPIView
+from management.views import AdminAPIView, AttendanceAPIView, AttendanceFileAPIView, AttendanceFileDownloadAPIView, AttendanceReportAPIView, DataFechEvenUnitIdAPIView, EventsAPIView, LocationAPIView, LoginAPIView, RegisterAPIView, TotalCountAPIView, UnitAPIView, UploadFileExtractTextAPIView, UploadVolunteerExcelView, VerifyOTPAPIView, VolunteerAPIView, VolunteersByUnitPostAPIView, VolunteersReportAPIView
 
 urlpatterns = [
     path('register/', RegisterAPIView.as_view(), name='register-unit'),
@@ -45,6 +45,11 @@ urlpatterns = [
     
     # path('upload-image-stats/', UploadVolunteerImageStatsView.as_view(), name='upload-image-stats'),
     path('extract-table/', UploadFileExtractTextAPIView.as_view(), name='extract-table-api'),
+    
+    path('volunteer-report/', VolunteersReportAPIView.as_view(), name='volunteer-report-api'),
+    
+    path('attendance-report/', AttendanceReportAPIView.as_view()),
+    path('attendance-report/<str:event_id>/', AttendanceReportAPIView.as_view(), name='attendance-report-api'),
 
     
        

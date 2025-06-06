@@ -1,5 +1,6 @@
 from django.db import models
 from django.utils.timezone import now
+from django.utils import timezone
 from django.contrib.auth.hashers import make_password, check_password
 
 class Register(models.Model):
@@ -49,6 +50,7 @@ class Unit(models.Model):
     password = models.CharField(max_length=250)   
     # plain_password = models.CharField(max_length=250, null=True, blank=True)
     email = models.EmailField(max_length=254, null=True, blank=True)
+    otp = models.CharField(max_length=6, blank=True, null=True)
     phone = models.CharField(max_length=50, null=True, blank=True)
     location = models.CharField(max_length=255, null=True)
 
@@ -112,11 +114,15 @@ class Attendance(models.Model):
         return f" {self.date} "
     
     def save(self, *args, **kwargs):
-        # Automatically manage mutually exclusive present/absent fields
+        # Manage mutually exclusive flags
         if self.present:
             self.absent = False
+            if not self.in_time:
+                self.in_time = timezone.now().time()
         elif self.absent:
             self.present = False
+            self.in_time = None  # Clear in_time if marked absent
+
         super().save(*args, **kwargs)
         
 

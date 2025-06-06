@@ -63,55 +63,54 @@ def extract_table_data_from_image(image_path):
 #                 continue
 #     return data
 
+
+
 def parse_sewadal_adhikari_data(lines):
     data = []
+    current_entry = {}
+
     for line in lines:
-        if re.match(r"^\d+\s+\w+", line):  # line starts with sr. no and designation
-            try:
-                entry = {}
-                parts = line.strip().split(None, 2)
-                entry['sr_no'] = int(parts[0])
-                entry['designation'] = parts[1]
+        # Entry starts with Sr. No.
+        match = re.match(r"^(\d+)\s+([A-Za-z]+)\s+(.*)", line)
+        if match:
+            # Save previous entry if any
+            if current_entry:
+                data.append(current_entry)
+                current_entry = {}
 
-                # Re-join remaining text block
-                details = parts[2]
+            current_entry["sr_no"] = int(match.group(1))
+            current_entry["designation"] = match.group(2).strip()
+            current_entry["name"] = match.group(3).strip()
 
-                # Extract fields using regex
-                name_match = re.search(r'\t{2,}(.*?)\n', details)
-                if name_match:
-                    entry['name'] = name_match.group(1).strip()
-                else:
-                    name_line = details.split("\n")[0].strip()
-                    entry['name'] = name_line
+        elif "New P#:" in line:
+            current_entry["new_p_no"] = re.search(r'New P#:\s*(\S+)', line).group(1)
 
-                entry['father_name'] = re.search(r'\n\s*(.*?)\n', details).group(1).strip()
+        elif "Old P#:" in line:
+            current_entry["old_p_no"] = re.search(r'Old P#:\s*(\S+)', line).group(1)
 
-                entry['new_p_no'] = re.search(r'New P#:\s*(SNSD\d+)', details).group(1)
-                entry['old_p_no'] = re.search(r'Old P#:\s*(\d+)', details).group(1)
-                entry['wef'] = re.search(r'WEF:\s*([\d/]+)', details).group(1)
-                entry['dob'] = re.search(r'DOB:\s*([\d/]+)', details).group(1)
+        elif "WEF:" in line:
+            current_entry["wef"] = re.search(r'WEF:\s*(\S+)', line).group(1)
 
-                qualification = re.search(r'\n\s*([A-Za-z0-9.\s]+)\n', details)
-                entry['qualification'] = qualification.group(1).strip() if qualification else ""
+        elif "DOB:" in line:
+            current_entry["dob"] = re.search(r'DOB:\s*(\S+)', line).group(1)
 
-                occupation = re.findall(r'\n\s*([A-Za-z0-9().\s]+)\n', details)
-                if occupation and len(occupation) > 1:
-                    entry['occupation'] = occupation[1].strip()
-                else:
-                    entry['occupation'] = ""
+        elif re.match(r'^[A-Za-z. ]+$', line.strip()):
+            # Likely qualification or occupation
+            if "qualification" not in current_entry:
+                current_entry["qualification"] = line.strip()
+            elif "occupation" not in current_entry:
+                current_entry["occupation"] = line.strip()
 
-                contact_match = re.search(r'\b\d{10}\b', details)
-                entry['contact'] = contact_match.group() if contact_match else ""
+        elif re.search(r'\d{10}', line):
+            # Line with address and 10-digit mobile
+            contact_match = re.search(r'(\d{10})', line)
+            current_entry["contact"] = contact_match.group(1)
+            current_entry["address"] = line.replace(contact_match.group(1), '').strip()
 
-                # Address is text just before contact number
-                if entry['contact']:
-                    address = details.split(entry['contact'])[0].split("\n")[-1].strip()
-                    entry['address'] = address
-                else:
-                    entry['address'] = ""
+        elif current_entry and "father_name" not in current_entry:
+            current_entry["father_name"] = line.strip()
 
-                data.append(entry)
+    if current_entry:
+        data.append(current_entry)
 
-            except Exception as e:
-                continue
     return data

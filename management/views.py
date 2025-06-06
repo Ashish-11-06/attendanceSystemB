@@ -27,17 +27,42 @@ from management.models import Admin, Attendance, AttendanceFile, EventUnitLocati
 from management.serializers import AdminSerializer, AttendanceFileSerializer, AttendanceSerializer, EventUnitLocationSerializer, EventsSerializer, LocationSerializer, LoginSerializer, RegisterSerializer, UnitSerializer, VolunteerSerializer
 from management.utils import extract_table_data_from_image, parse_sewadal_adhikari_data,  send_otp_email
 
+# class RegisterAPIView(APIView):
+#     def post(self, request):
+#         serializer = UnitSerializer(data=request.data)
+#         if serializer.is_valid():
+#             # Generate OTP
+#             otp = str(random.randint(100000, 999999))
+
+#             # Temporarily save OTP in validated_data
+#             serializer.save(otp=otp)
+
+#             # Send OTP to email
+#             email = serializer.validated_data.get('email')
+#             send_otp_email(email, otp)
+
+#             return Response({
+#                 "message": "Registration successful! OTP sent to email.",
+#                 "data": serializer.data
+#             }, status=status.HTTP_201_CREATED)
+#         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
 class RegisterAPIView(APIView):
     def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
-        if serializer.is_valid():
-            # Generate OTP
-            otp = str(random.randint(100000, 999999))
+        data = request.data.copy()
 
-            # Temporarily save OTP in validated_data
+        # Hash the password before saving
+        if 'password' in data:
+            raw_password = data['password']
+            data['plain_password'] = raw_password  # Store raw if needed
+            data['password'] = make_password(raw_password)
+
+        serializer = UnitSerializer(data=data)
+        if serializer.is_valid():
+            otp = str(random.randint(100000, 999999))
             serializer.save(otp=otp)
 
-            # Send OTP to email
             email = serializer.validated_data.get('email')
             send_otp_email(email, otp)
 
@@ -56,13 +81,13 @@ class VerifyOTPAPIView(APIView):
             return Response({"error": "Email and OTP are required."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            user = Register.objects.get(email=email, otp=otp)
+            user = Unit.objects.get(email=email, otp=otp)
             # OTP matched — now clear it from the database
             user.otp = None  # or use '' if you prefer empty string
             user.save()
             
             return Response({"message": "OTP verification successful!"}, status=status.HTTP_200_OK)
-        except Register.DoesNotExist:
+        except Unit.DoesNotExist:
             return Response({"error": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
         
 class LoginAPIView(APIView):
@@ -83,6 +108,7 @@ class LoginAPIView(APIView):
                     return Response({
                         "message": "Admin login successful",
                         "user": {
+                            "id": admin.id,
                             "admin_name": admin.name,
                             "email": admin.email,
                             "user_type": "admin",
@@ -98,8 +124,9 @@ class LoginAPIView(APIView):
             user = Register.objects.filter(email__iexact=email, user_type='unit').first()
             if user and check_password(password, user.password):
                 return Response({
-                    "message": "Unit login successful (via Register)",
+                    "message": "Unit login successful ",
                     "user": {
+                        "id": user.id,
                         "unit_name": user.unit_name,
                         "email": user.email,
                         "user_type": user.user_type,
@@ -110,8 +137,9 @@ class LoginAPIView(APIView):
             unit = Unit.objects.filter(email__iexact=email).first()
             if unit and check_password(password, unit.password):
                 return Response({
-                    "message": "Unit login successful (via Unit)",
+                    "message": "Unit login successful",
                     "user": {
+                        "id": unit.id,
                         "unit_name": unit.unit_name,
                         "email": unit.email,
                         "user_type": "unit",
@@ -275,7 +303,8 @@ class EventsAPIView(APIView):
                 if loc_id not in location_map:
                     location_map[loc_id] = {
                         "location_id": entry.location.id,
-                        "location_name": entry.location.city,  # Assuming `name` field in Location
+                        "location_city": entry.location.city,  # Assuming `name` field in Location
+                        "location_address": entry.location.address,  # Assuming `address` field in Location
                         "units": []
                     }
 
@@ -378,10 +407,78 @@ class EventsAPIView(APIView):
             return Response({"error": "event_id is required in URL."}, status=status.HTTP_400_BAD_REQUEST)
 
         event = get_object_or_404(Events, event_id=event_id)
-        serializer = EventsSerializer(event, data=request.data)
+        data = request.data.copy()
+
+        # Remove locations from main data and handle separately
+        locations_data = data.pop("locations", [])
+
+        serializer = EventsSerializer(event, data=data)
         if serializer.is_valid():
-            serializer.save()
-            return Response({"message": "Event updated successfully!", "data": serializer.data})
+            event = serializer.save()
+
+            # ✅ Clear old location-unit mappings
+            EventUnitLocation.objects.filter(event=event).delete()
+
+            # ✅ Re-add updated mappings
+            for loc in locations_data:
+                location_id = loc.get("location_id")
+                unit_ids = loc.get("unit", [])
+                try:
+                    location = Location.objects.get(id=location_id)
+                    for unit_id in unit_ids:
+                        unit = Unit.objects.get(id=unit_id)
+                        EventUnitLocation.objects.create(
+                            event=event,
+                            location=location,
+                            unit=unit
+                        )
+                except Location.DoesNotExist:
+                    return Response({"error": f"Location ID {location_id} not found."}, status=400)
+                except Unit.DoesNotExist:
+                    return Response({"error": f"Unit ID {unit_id} not found."}, status=400)
+
+            # ✅ Prepare response in the same format
+            response_data = {
+                "id": event.id,
+                "event_id": event.event_id,
+                "event_name": event.event_name,
+                "start_date": event.start_date,
+                "end_date": event.end_date,
+                "time": event.time,
+                "locations": []
+            }
+
+            event_locations = EventUnitLocation.objects.filter(event=event)
+            location_map = {}
+
+            for entry in event_locations:
+                if not entry.unit or not entry.location:
+                    continue
+
+                loc_id = entry.location.id
+                if loc_id not in location_map:
+                    location_map[loc_id] = {
+                        "location_id": loc_id,
+                        "location_name": entry.location.city,  # assuming 'city' is the name
+                        "units": []
+                    }
+
+                unit = entry.unit
+                location_map[loc_id]["units"].append({
+                    "unit_id": unit.id,
+                    "unit_name": unit.unit_name,
+                    "email": unit.email,
+                    "phone": unit.phone,
+                    "location": unit.location
+                })
+
+            response_data["locations"] = list(location_map.values())
+
+            return Response({
+                "message": "Event updated successfully!",
+                "data": response_data
+            }, status=200)
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, event_id=None):
@@ -451,30 +548,28 @@ class UnitAPIView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def put(self, request, unit_id):
-        # print("Received request data for update:", request.data)
         if not unit_id:
             return Response({"error": "Unit ID is required."}, status=status.HTTP_400_BAD_REQUEST)
-        
-        try:
-            unit = Unit.objects.get(id=unit_id)  # Or `id=unit_id` if you're using PK
-        except Unit.DoesNotExist:
-            return Response({"error": "No Unit matches the given ID."}, status=status.HTTP_404_NOT_FOUND)
-    
+
         unit = get_object_or_404(Unit, id=unit_id)
-        # print("Found unit for update:", unit)
         
-        data = request.data.copy()  
-        if 'password' in data:
+        data = request.data.copy()  # Make a mutable copy of request data
+
+        # If 'password' is present and not empty, hash and store it
+        if data.get('password'):
             raw_password = data['password']
             data['plain_password'] = raw_password
             data['password'] = make_password(raw_password)
-            
-        serializer = UnitSerializer(unit, data=request.data)
+        else:
+            # If password not provided or is empty, exclude it from update
+            data.pop('password', None)
+
+        serializer = UnitSerializer(unit, data=data, partial=True)  # partial=True allows skipping fields
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+
     def delete(self, request, unit_id=None):
         if not unit_id:
             return Response({"error": "unit_id is required in URL."}, status=status.HTTP_400_BAD_REQUEST)
@@ -540,14 +635,19 @@ class AdminAPIView(APIView):
             return Response({"error": "ID is required for update."}, status=status.HTTP_400_BAD_REQUEST)
 
         admin = get_object_or_404(Admin, id=admin_id)
-        serializer = AdminSerializer(admin, data=request.data)
+        data = request.data.copy()
+
+        # If 'password' is not provided or is empty, remove it so it's not updated
+        if not data.get('password'):
+            data.pop('password', None)
+
+        serializer = AdminSerializer(admin, data=data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-    
 class AttendanceAPIView(APIView):
     def get(self, request, attendance_id=None):
         if attendance_id:
@@ -571,19 +671,33 @@ class AttendanceAPIView(APIView):
     
     def post(self, request):
         is_many = isinstance(request.data, list)
-        serializer = AttendanceSerializer(data=request.data, many=is_many)
+        data = request.data if is_many else [request.data]  # Always work with a list for easy looping
 
+        for item in data:
+            event_id = item.get('event')
+            unit_id = item.get('unit')
+            # volunteer_id = item.get('volunteer')
+            # date = item.get('date')  
+
+            if Attendance.objects.filter(event_id=event_id, unit_id=unit_id).exists():
+                return Response({
+                    "message": f"Attendance already submitted for this event and unit."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Proceed with saving if no duplicates found
+        serializer = AttendanceSerializer(data=request.data, many=is_many)
         if serializer.is_valid():
             serializer.save()
             return Response({
                 "message": "Attendance recorded",
                 "data": serializer.data
             }, status=status.HTTP_201_CREATED)
-        
+
         return Response({
             "message": "Failed to record attendance",
             "errors": serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
+
     
     def put(self, request, attendance_id):
         attendance = get_object_or_404(Attendance, atd_id=attendance_id)  # Use atd_id not pk
@@ -846,3 +960,106 @@ class UploadFileExtractTextAPIView(APIView):
 
         except Exception as e:
             return Response({"error": str(e)}, status=500)
+        
+        
+class VolunteersReportAPIView(APIView):
+    def get(self, request):
+        try:
+            data = []
+            units = Unit.objects.all()
+
+            for unit in units:
+                volunteers = Volunteer.objects.filter(unit=unit)
+
+                total_male = volunteers.filter(gender='Male').count()
+                total_female = volunteers.filter(gender='Female').count()
+                total_registered = volunteers.filter(is_registered=True).count()
+                total_unregistered = volunteers.filter(is_registered=False).count()
+                unregistered_male = volunteers.filter(is_registered=False, gender='Male').count()
+                unregistered_female = volunteers.filter(is_registered=False, gender='Female').count()
+
+                grand_total = (total_male + total_female + unregistered_male + unregistered_female)
+
+                data.append({
+                    "id": unit.id,
+                    "unit_id": unit.unit_id,   # adjust if your Unit model has a different field
+                    "unit_name": unit.unit_name,
+                    "total_male": total_male,
+                    "total_female": total_female,
+                    "total_registered": total_registered,
+                    "total_unregistered": total_unregistered,
+                    "unregistered_male": unregistered_male,
+                    "unregistered_female": unregistered_female,
+                    "grand_total": grand_total
+                })
+
+            return Response(data, status=200)
+
+        except Exception as e:
+            return Response({"status": False, "message": str(e)}, status=500)
+        
+
+class AttendanceReportAPIView(APIView):
+    def get(self, request, event_id=None):
+        try:
+            if event_id is None:
+                return Response({"message": "Event ID is required"}, status=400)
+
+            # Get all present attendance records for the given event
+            attendance_qs = Attendance.objects.filter(event__id=event_id, present=True)
+
+            # Total present count
+            total_present = attendance_qs.count()
+
+            # Count based on gender
+            total_present_male = attendance_qs.filter(volunteer__gender__iexact="Male").count()
+            total_present_female = attendance_qs.filter(volunteer__gender__iexact="Female").count()
+
+            return Response({
+                "event_id": event_id,
+                "total_present": total_present,
+                "total_present_male": total_present_male,
+                "total_present_female": total_present_female
+            }, status=200)
+
+        except Exception as e:
+            return Response({"status": False, "message": str(e)}, status=500)
+   
+
+# class AttendanceReportAPIView(APIView):
+#     def get(self, request, event_id=None):
+#         try:
+#             if event_id is None:
+#                 return Response({"message": "Event ID is required"}, status=400)
+
+#             attendance_records = Attendance.objects.filter(event__id=event_id, present=True)
+
+#             data = []
+#             for attendance in attendance_records:
+#                 data.append({
+#                     "attendance_id": attendance.atd_id,
+#                     "date": attendance.date,
+#                     "in_time": attendance.in_time,
+#                     "out_time": attendance.out_time,
+#                     "remark": attendance.remark,
+#                     "volunteer": {
+#                         "id": attendance.volunteer.id,
+#                         "name": attendance.volunteer.name,
+#                         "phone": attendance.volunteer.phone,
+#                         "email": attendance.volunteer.email,
+#                     },
+#                     "unit": {
+#                         "id": attendance.unit.id,
+#                         "unit_name": attendance.unit.unit_name,
+                        
+#                     }
+#                 })
+
+#             return Response({
+#                 "event_id": event_id,
+#                 "total_present": attendance_records.count(),
+#                 "present_volunteers": data
+#             }, status=200)
+
+#         except Exception as e:
+#             return Response({"status": False, "message": str(e)}, status=500)

@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Admin, Attendance, AttendanceFile, EventUnitLocation, Events, Location, Register, Unit, Volunteer
+from django.utils import timezone
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -80,10 +81,13 @@ class EventsSerializer(serializers.ModelSerializer):
         return rep
        
 class UnitSerializer(serializers.ModelSerializer):
-    # password = serializers.CharField(write_only=True)
+    password = serializers.CharField(required=False, write_only=True)
     class Meta:
         model = Unit # Assuming Unit is defined in management.models
         fields = '__all__'
+        extra_kwargs = {
+            'unit_id': {'required': False, 'allow_null': True, 'allow_blank': True},
+        }
         
 class VolunteerSerializer(serializers.ModelSerializer):
     # Accept only unit ID during write
@@ -114,7 +118,7 @@ class VolunteerSerializer(serializers.ModelSerializer):
     
     
 class AdminSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
+    password = serializers.CharField(required=False, write_only=True)
     class Meta:
         model = Admin  # Assuming Admin is defined in management.models
         fields = '__all__'
@@ -134,16 +138,15 @@ class AdminSerializer(serializers.ModelSerializer):
 
         
 class AttendanceSerializer(serializers.ModelSerializer):
-    # Use ID for write
     volunteer = serializers.PrimaryKeyRelatedField(queryset=Volunteer.objects.all())
     event = serializers.PrimaryKeyRelatedField(queryset=Events.objects.all())
     unit = serializers.PrimaryKeyRelatedField(queryset=Unit.objects.all(), required=False)
+
     class Meta:
         model = Attendance
         fields = ['id', 'atd_id', 'present', 'absent', 'in_time', 'out_time', 'date', 'remark', 'volunteer', 'event', 'unit']
         read_only_fields = ('atd_id',)
 
-    # Use nested serializer for read
     def to_representation(self, instance):
         representation = super().to_representation(instance)
         representation['volunteer'] = VolunteerSerializer(instance.volunteer).data
@@ -151,6 +154,16 @@ class AttendanceSerializer(serializers.ModelSerializer):
         return representation
 
     def create(self, validated_data):
+        present = validated_data.get('present', False)
+        absent = validated_data.get('absent', False)
+        in_time = validated_data.get('in_time')
+
+        # Handle time based on present/absent flags
+        if present and not in_time:
+            validated_data['in_time'] = timezone.now().time()
+        elif absent:
+            validated_data['in_time'] = None
+
         # Generate atd_id like ATD001, ATD002 ...
         last_atd = Attendance.objects.order_by('atd_id').last()
         if last_atd and last_atd.atd_id:
@@ -162,6 +175,17 @@ class AttendanceSerializer(serializers.ModelSerializer):
         validated_data['atd_id'] = f"ATD{new_id_num:03d}"
         return super().create(validated_data)
 
+    def update(self, instance, validated_data):
+        present = validated_data.get('present', instance.present)
+        absent = validated_data.get('absent', instance.absent)
+        in_time = validated_data.get('in_time', instance.in_time)
+
+        if present and not in_time:
+            validated_data['in_time'] = timezone.now().time()
+        elif absent:
+            validated_data['in_time'] = None
+
+        return super().update(instance, validated_data)
 
 class AttendanceFileSerializer(serializers.ModelSerializer):
     event = serializers.PrimaryKeyRelatedField(queryset=Events.objects.all())
