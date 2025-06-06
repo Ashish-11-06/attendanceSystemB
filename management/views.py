@@ -999,6 +999,8 @@ class VolunteersReportAPIView(APIView):
             return Response({"status": False, "message": str(e)}, status=500)
         
 
+from collections import defaultdict
+
 class AttendanceReportAPIView(APIView):
     def get(self, request, event_id=None):
         try:
@@ -1008,23 +1010,56 @@ class AttendanceReportAPIView(APIView):
             # Get all present attendance records for the given event
             attendance_qs = Attendance.objects.filter(event__id=event_id, present=True)
 
-            # Total present count
-            total_present = attendance_qs.count()
+            # Get distinct unit IDs from attendance
+            unit_ids = attendance_qs.values_list('unit__id', flat=True).distinct()
+            response_data = []
 
-            # Count based on gender
-            total_present_male = attendance_qs.filter(volunteer__gender__iexact="Male").count()
-            total_present_female = attendance_qs.filter(volunteer__gender__iexact="Female").count()
+            for unit_id in unit_ids:
+                unit_attendance = attendance_qs.filter(unit__id=unit_id)
+
+                total_present = unit_attendance.count()
+                total_present_male = unit_attendance.filter(volunteer__gender__iexact="Male").count()
+                total_present_female = unit_attendance.filter(volunteer__gender__iexact="Female").count()
+
+                total_unregister_male = unit_attendance.filter(
+                    volunteer__gender__iexact="Male",
+                    volunteer__is_registered=False
+                ).count()
+
+                total_unregister_female = unit_attendance.filter(
+                    volunteer__gender__iexact="Female",
+                    volunteer__is_registered=False
+                ).count()
+
+                total_reg_male_present = total_present_male - total_unregister_male
+                total_reg_female_present = total_present_female - total_unregister_female
+
+                total_reg = total_reg_male_present + total_reg_female_present
+                total_unreg = total_unregister_male + total_unregister_female
+                grand_total = total_reg + total_unreg
+
+                response_data.append({
+                    "unit_id": unit_id,
+                    "total_present": total_present,
+                    "total_present_male": total_present_male,
+                    "total_present_female": total_present_female,
+                    "total_unregister_male": total_unregister_male,
+                    "total_unregister_female": total_unregister_female,
+                    "total_register_male": total_reg_male_present,
+                    "total_register_female": total_reg_female_present,
+                    "total_register": total_reg,
+                    "total_unregister": total_unreg,
+                    "grand_total": grand_total
+                })
 
             return Response({
                 "event_id": event_id,
-                "total_present": total_present,
-                "total_present_male": total_present_male,
-                "total_present_female": total_present_female
+                "unit_summary": response_data
             }, status=200)
 
         except Exception as e:
             return Response({"status": False, "message": str(e)}, status=500)
-   
+
 
 # class AttendanceReportAPIView(APIView):
 #     def get(self, request, event_id=None):
