@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'rest_framework',
     
     'management',
+    'rest_framework_simplejwt',
 ]
 
 MIDDLEWARE = [
@@ -164,3 +165,15 @@ EMAIL_HOST_PASSWORD = 'pnqhgteuanykydbj'       # pnqh gteu anyk ydbj
 
 
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'event.authentication.MultiUserJWTAuthentication',
+    ),
+    # 'DEFAULT_AUTHENTICATION_CLASSES': (
+    #     'rest_framework_simplejwt.authentication.JWTAuthentication',
+    # ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
+}

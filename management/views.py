@@ -26,6 +26,9 @@ from rest_framework import status
 from management.models import Admin, Attendance, AttendanceFile, EventUnitLocation, Events, Location, Register, Unit, Volunteer
 from management.serializers import AdminSerializer, AttendanceFileSerializer, AttendanceSerializer, EventUnitLocationSerializer, EventsSerializer, LocationSerializer, LoginSerializer, RegisterSerializer, UnitSerializer, VolunteerSerializer
 from management.utils import extract_table_data_from_image, parse_sewadal_adhikari_data,  send_otp_email
+from rest_framework_simplejwt.tokens import AccessToken
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 
 # class RegisterAPIView(APIView):
 #     def post(self, request):
@@ -49,6 +52,7 @@ from management.utils import extract_table_data_from_image, parse_sewadal_adhika
 
 
 class RegisterAPIView(APIView):
+    permission_classes = [AllowAny]
     def post(self, request):
         data = request.data.copy()
 
@@ -73,6 +77,7 @@ class RegisterAPIView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
 class VerifyOTPAPIView(APIView):
+    permission_classes = [AllowAny]
     def post(self, request):
         email = request.data.get("email")
         otp = request.data.get("otp")
@@ -89,8 +94,16 @@ class VerifyOTPAPIView(APIView):
             return Response({"message": "OTP verification successful!"}, status=status.HTTP_200_OK)
         except Unit.DoesNotExist:
             return Response({"error": "Invalid email or OTP."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+def get_token_for_user(user_instance, user_type):
+    token = AccessToken.for_user(user_instance)
+    token['user_type'] = user_type  # add custom claim
+    return token
+
         
 class LoginAPIView(APIView):
+    permission_classes = [AllowAny]
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         if not serializer.is_valid():
@@ -105,13 +118,14 @@ class LoginAPIView(APIView):
             try:
                 admin = Admin.objects.get(email__iexact=email)
                 if check_password(password, admin.password):
+                    access_token = get_token_for_user(admin, 'admin')
                     return Response({
                         "message": "Admin login successful",
                         "user": {
                             "id": admin.id,
                             "admin_name": admin.name,
                             "email": admin.email,
-                            "user_type": "admin",
+                            "access": str(access_token),
                         }
                     }, status=status.HTTP_200_OK)
                 else:
@@ -123,6 +137,7 @@ class LoginAPIView(APIView):
             # Try Register table first
             user = Register.objects.filter(email__iexact=email, user_type='unit').first()
             if user and check_password(password, user.password):
+                access_token = get_token_for_user(user, 'unit')
                 return Response({
                     "message": "Unit login successful ",
                     "user": {
@@ -130,12 +145,15 @@ class LoginAPIView(APIView):
                         "unit_name": user.unit_name,
                         "email": user.email,
                         "user_type": user.user_type,
+                        "access": str(access_token),
+                        
                     }
                 }, status=status.HTTP_200_OK)
 
             # Try Unit table next
             unit = Unit.objects.filter(email__iexact=email).first()
             if unit and check_password(password, unit.password):
+                access_token = get_token_for_user(user, 'unit')
                 return Response({
                     "message": "Unit login successful",
                     "user": {
@@ -143,6 +161,7 @@ class LoginAPIView(APIView):
                         "unit_name": unit.unit_name,
                         "email": unit.email,
                         "user_type": "unit",
+                        "access": str(access_token),
                     }
                 }, status=status.HTTP_200_OK)
 
@@ -611,6 +630,7 @@ class VolunteerAPIView(APIView):
 
     
 class AdminAPIView(APIView):
+    permission_classes = [IsAuthenticated]
     def get(self, request, admin_id=None):
         if admin_id:
             # Get single admin by id

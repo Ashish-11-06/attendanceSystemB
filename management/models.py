@@ -12,6 +12,10 @@ class Register(models.Model):
     user_type = models.CharField(max_length=50, null=True, default='unit')
     created_at = models.DateTimeField(default=now)
     
+    @property
+    def is_authenticated(self):
+        return True
+    
     def save(self, *args, **kwargs):
         if not self.password.startswith('pbkdf2_'):
             self.password = make_password(self.password)
@@ -54,6 +58,9 @@ class Unit(models.Model):
     phone = models.CharField(max_length=50, null=True, blank=True)
     location = models.CharField(max_length=255, null=True)
 
+    @property
+    def is_authenticated(self):
+        return True
     
     def __str__(self):
         return f"{self.unit_name} - {self.unit_id} "
@@ -89,6 +96,10 @@ class Admin(models.Model):
     password = models.CharField(max_length=250)
     user_type = models.CharField(max_length=20, null=True, default='admin')
     
+    @property
+    def is_authenticated(self):
+        return True
+        
     def __str__(self):
         return f"{self.name} - {self.admin_id} "
     
