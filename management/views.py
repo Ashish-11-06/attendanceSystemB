@@ -153,7 +153,7 @@ class LoginAPIView(APIView):
             # Try Unit table next
             unit = Unit.objects.filter(email__iexact=email).first()
             if unit and check_password(password, unit.password):
-                access_token = get_token_for_user(user, 'unit')
+                access_token = get_token_for_user(unit, 'unit')
                 return Response({
                     "message": "Unit login successful",
                     "user": {
