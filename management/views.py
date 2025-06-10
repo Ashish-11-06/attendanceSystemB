@@ -291,6 +291,8 @@ class UploadVolunteerExcelView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class EventsAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def get(self, request, event_id=None):
         if event_id:
             events = Events.objects.filter(event_id=event_id)
@@ -542,6 +544,7 @@ class LocationAPIView(APIView):
 
     
 class UnitAPIView(APIView):
+    permission_classes = [IsAuthenticated]
     def get(self, request, unit_id=None):
         if unit_id:
             # Get single unit by id
@@ -1018,7 +1021,6 @@ class VolunteersReportAPIView(APIView):
         except Exception as e:
             return Response({"status": False, "message": str(e)}, status=500)
         
-
 from collections import defaultdict
 
 class AttendanceReportAPIView(APIView):
@@ -1026,6 +1028,10 @@ class AttendanceReportAPIView(APIView):
         try:
             if event_id is None:
                 return Response({"message": "Event ID is required"}, status=400)
+             # Get the event
+            event = get_object_or_404(Events, id=event_id)
+            event_name = event.event_name
+            
 
             # Get all present attendance records for the given event
             attendance_qs = Attendance.objects.filter(event__id=event_id, present=True)
@@ -1057,9 +1063,14 @@ class AttendanceReportAPIView(APIView):
                 total_reg = total_reg_male_present + total_reg_female_present
                 total_unreg = total_unregister_male + total_unregister_female
                 grand_total = total_reg + total_unreg
+                
+                # Fetch unit name
+                unit = get_object_or_404(Unit, id=unit_id)
+                unit_name = unit.unit_name
 
                 response_data.append({
                     "unit_id": unit_id,
+                    "unit_name": unit_name,
                     "total_present": total_present,
                     "total_present_male": total_present_male,
                     "total_present_female": total_present_female,
@@ -1074,6 +1085,7 @@ class AttendanceReportAPIView(APIView):
 
             return Response({
                 "event_id": event_id,
+                "event_name": event_name,
                 "unit_summary": response_data
             }, status=200)
 
@@ -1081,40 +1093,3 @@ class AttendanceReportAPIView(APIView):
             return Response({"status": False, "message": str(e)}, status=500)
 
 
-# class AttendanceReportAPIView(APIView):
-#     def get(self, request, event_id=None):
-#         try:
-#             if event_id is None:
-#                 return Response({"message": "Event ID is required"}, status=400)
-
-#             attendance_records = Attendance.objects.filter(event__id=event_id, present=True)
-
-#             data = []
-#             for attendance in attendance_records:
-#                 data.append({
-#                     "attendance_id": attendance.atd_id,
-#                     "date": attendance.date,
-#                     "in_time": attendance.in_time,
-#                     "out_time": attendance.out_time,
-#                     "remark": attendance.remark,
-#                     "volunteer": {
-#                         "id": attendance.volunteer.id,
-#                         "name": attendance.volunteer.name,
-#                         "phone": attendance.volunteer.phone,
-#                         "email": attendance.volunteer.email,
-#                     },
-#                     "unit": {
-#                         "id": attendance.unit.id,
-#                         "unit_name": attendance.unit.unit_name,
-                        
-#                     }
-#                 })
-
-#             return Response({
-#                 "event_id": event_id,
-#                 "total_present": attendance_records.count(),
-#                 "present_volunteers": data
-#             }, status=200)
-
-#         except Exception as e:
-#             return Response({"status": False, "message": str(e)}, status=500)
