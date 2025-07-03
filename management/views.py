@@ -179,7 +179,6 @@ class UploadVolunteerExcelView(APIView):
         if not file:
             return Response({'error': 'No file uploaded'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Use the unit_id from the URL directly
         try:
             unit_from_url = Unit.objects.get(id=unit_id)
         except Unit.DoesNotExist:
@@ -193,7 +192,6 @@ class UploadVolunteerExcelView(APIView):
                 sheet_name = sheet.title.strip().lower()
                 count = 0
 
-                # Detect gender and registration status based on sheet name
                 gender = None
                 is_registered = True
 
@@ -208,10 +206,8 @@ class UploadVolunteerExcelView(APIView):
                     gender = 'Female'
                     is_registered = False
 
-                # Step 1: Get headers from row 3
                 raw_headers = [str(cell.value).strip().lower() if cell.value else '' for cell in sheet[3]]
 
-                # Normalize column_map keys to lowercase too
                 column_map = {
                     'new p#': 'new_personal_number',
                     'old p#': 'old_personal_number',
@@ -220,43 +216,38 @@ class UploadVolunteerExcelView(APIView):
                     'email': 'email',
                     'volunteer id': 'volunteer_id',
                     'unit id': 'unit_id',
-                    's#': 's_number'  # Add S# to the column map
+                    's#': 's_number'
                 }
 
-                # Map column index to model field using normalized header
-                header_field_map = {}
-                for idx, header in enumerate(raw_headers):
-                    field = column_map.get(header)
-                    if field:
-                        header_field_map[idx] = field
-
-                # print("Header field map:", header_field_map)
+                header_field_map = {
+                    idx: column_map.get(header)
+                    for idx, header in enumerate(raw_headers)
+                    if column_map.get(header)
+                }
 
                 for row in sheet.iter_rows(min_row=4, values_only=True):
                     if not any(row):
                         continue
 
-                    row_data = {}
-                    for idx, value in enumerate(row):
-                        field_name = header_field_map.get(idx)
-                        if field_name:
-                            row_data[field_name] = value
+                    row_data = {
+                        header_field_map[idx]: value
+                        for idx, value in enumerate(row)
+                        if header_field_map.get(idx)
+                    }
 
-                    # Check if S# is 'X' and skip the row if it is
-                    s_number = row_data.get('s_number')
-                    if s_number == 'X':
-                        print("Skipping row due to S# being 'X'")
-                        continue  # Skip this row if S# is 'X'
+                    if row_data.get('s_number') == 'X':
+                        continue
 
-                    # Clean and validate data
                     name = row_data.get('name', '').strip()
-
                     if not name:
-                        # print("Skipping row due to empty name")
-                        continue  # Skip this row if name is empty
+                        continue
+
+                    new_pn = row_data.get('new_personal_number')
+                    if not new_pn:
+                        continue
 
                     # Determine unit instance
-                    unit = unit_from_url  # Use the unit from the URL directly
+                    unit = unit_from_url
                     unit_id_in_row = row_data.get('unit_id')
                     if unit_id_in_row:
                         try:
@@ -264,18 +255,22 @@ class UploadVolunteerExcelView(APIView):
                         except Unit.DoesNotExist:
                             print(f"Unit ID {unit_id_in_row} not found, using default unit")
 
+                    # Check if a volunteer already exists with same unit and new_personal_number
+                    if Volunteer.objects.filter(unit=unit, new_personal_number=new_pn).exists():
+                        print(f"Skipping: Volunteer with new_personal_number={new_pn} already exists in unit {unit.id}")
+                        continue
+
                     data = {
                         'name': name,
                         'email': row_data.get('email'),
                         'phone': row_data.get('phone'),
                         'old_personal_number': row_data.get('old_personal_number'),
-                        'new_personal_number': row_data.get('new_personal_number'),
-                        'gender': gender,  # Use the gender determined by the sheet name
+                        'new_personal_number': new_pn,
+                        'gender': gender,
                         'unit': unit.id if unit else None,
                         'is_registered': is_registered,
                     }
 
-                    # print("Row data passed to serializer:", data)
                     serializer = VolunteerSerializer(data=data)
                     if serializer.is_valid():
                         serializer.save()
@@ -289,7 +284,6 @@ class UploadVolunteerExcelView(APIView):
 
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 class EventsAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
