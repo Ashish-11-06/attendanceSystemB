@@ -23,8 +23,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from management.models import Admin, Attendance, AttendanceFile, EventUnitLocation, Events, Location, Register, Unit, Volunteer
-from management.serializers import AdminSerializer, AttendanceFileSerializer, AttendanceSerializer, EventUnitLocationSerializer, EventsSerializer, LocationSerializer, LoginSerializer, RegisterSerializer, UnitSerializer, VolunteerSerializer
+from management.models import Admin, Attendance, AttendanceFile, EventUnitLocation, Events, Khetra, Location, Register, Unit, Volunteer
+from management.serializers import AdminSerializer, AttendanceFileSerializer, AttendanceSerializer, EventUnitLocationSerializer, EventsSerializer, KhetraSerializer, LocationSerializer, LoginSerializer, RegisterSerializer, UnitSerializer, VolunteerSerializer
 from management.utils import extract_table_data_from_image, parse_sewadal_adhikari_data,  send_otp_email
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework.permissions import IsAuthenticated
@@ -362,21 +362,42 @@ class EventsAPIView(APIView):
 
             # Save EventUnitLocation entries
             for loc in locations_data:
-                location_id = loc.get("location_id")
+                location = None
                 unit_ids = loc.get("unit", [])
-                try:
-                    location = Location.objects.get(id=location_id)
-                    for unit_id in unit_ids:
+
+                # Case 1: Existing location by ID
+                if "location_id" in loc:
+                    try:
+                        location = Location.objects.get(id=loc["location_id"])
+                    except Location.DoesNotExist:
+                        return Response({"error": f"Location ID {loc['location_id']} not found."}, status=400)
+
+                # Case 2: New location to be created
+                elif "location" in loc:
+                    location_data = loc["location"]
+                    # Generate unique location_id for the Location model's field
+                    unique_location_id = str(uuid.uuid4())[:8]
+                    location = Location.objects.create(
+                        location_id=unique_location_id,
+                        state=location_data.get("state", ""),
+                        city=location_data.get("city", ""),
+                        address=location_data.get("address", "")
+                    )
+
+                else:
+                    return Response({"error": "Each location must include either 'location_id' or 'location'."}, status=400)
+
+                # Link units to the selected/created location
+                for unit_id in unit_ids:
+                    try:
                         unit = Unit.objects.get(id=unit_id)
                         EventUnitLocation.objects.create(
                             event=event,
                             location=location,
                             unit=unit
                         )
-                except Location.DoesNotExist:
-                    return Response({"error": f"Location ID {location_id} not found."}, status=400)
-                except Unit.DoesNotExist:
-                    return Response({"error": f"Unit ID {unit_id} not found."}, status=400)
+                    except Unit.DoesNotExist:
+                        return Response({"error": f"Unit ID {unit_id} not found."}, status=400)
 
             # Prepare full response
             response_data = {
@@ -722,21 +743,65 @@ class AttendanceAPIView(APIView):
         }, status=status.HTTP_400_BAD_REQUEST)
 
     
-    def put(self, request, attendance_id):
-        attendance = get_object_or_404(Attendance, atd_id=attendance_id)  # Use atd_id not pk
-        serializer = AttendanceSerializer(attendance, data=request.data)
+    def put(self, request):
+        is_many = isinstance(request.data, list)
+        data = request.data if is_many else [request.data]
 
-        if serializer.is_valid():
-            serializer.save()
+        updated_items = []
+        errors = []
+
+        for item in data:
+            event_id = item.get('event')
+            unit_id = item.get('unit')
+            volunteer_id = item.get('volunteer')  # This is internal DB ID (int)
+
+            if not event_id or not unit_id or not volunteer_id:
+                errors.append({
+                    "message": "Missing 'event', 'unit', or 'volunteer' (ID) in one of the items",
+                    "data": item
+                })
+                continue
+
+            attendance = Attendance.objects.filter(
+                event_id=event_id,
+                unit_id=unit_id,
+                volunteer_id=volunteer_id  # direct match with FK ID
+            ).first()
+
+            if not attendance:
+                errors.append({
+                    "message": f"Attendance record not found for event {event_id}, unit {unit_id}, and volunteer ID {volunteer_id}",
+                    "data": item
+                })
+                continue
+
+            serializer = AttendanceSerializer(attendance, data=item)
+            if serializer.is_valid():
+                serializer.save()
+                updated_items.append(serializer.data)
+            else:
+                errors.append({
+                    "message": f"Validation failed for volunteer ID {volunteer_id}",
+                    "errors": serializer.errors
+                })
+
+        if errors and updated_items:
             return Response({
-                "message": "Attendance updated successfully.",
-                "data": serializer.data
-            }, status=status.HTTP_200_OK)
+                "message": "Partial success: some attendance records updated, some failed.",
+                "updated": updated_items,
+                "errors": errors
+            }, status=status.HTTP_207_MULTI_STATUS)
+
+        elif errors:
+            return Response({
+                "message": "Failed to update attendance records.",
+                "errors": errors
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({
-            "message": "Failed to update attendance.",
-            "errors": serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
+            "message": "All attendance records updated successfully.",
+            "data": updated_items
+        }, status=status.HTTP_200_OK)
 
 
 class AttendanceFileAPIView(APIView):
@@ -805,6 +870,59 @@ class DataFechEvenUnitIdAPIView(APIView):
         else:
             return Response({"error": "unit_id and event_id are required."}, status=status.HTTP_400_BAD_REQUEST) 
         
+    def put(self, request):
+        data = request.data
+        if not isinstance(data, list) or not data:
+            return Response({
+                "message": "Expected a non-empty list of attendance records."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Extract event and unit from first item
+        event_id = data[0].get('event')
+        unit_id = data[0].get('unit')
+
+        if not event_id or not unit_id:
+            return Response({
+                "message": "Missing 'event' or 'unit' in the data."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Delete existing records for this event and unit
+        Attendance.objects.filter(event_id=event_id, unit_id=unit_id).delete()
+
+        created_items = []
+        errors = []
+
+        for index, item in enumerate(data):
+            serializer = AttendanceSerializer(data=item)
+            if serializer.is_valid():
+                serializer.save()
+                created_items.append(serializer.data)
+            else:
+                errors.append({
+                    "index": index,
+                    "errors": serializer.errors,
+                    "data": item
+                })
+
+        if errors and created_items:
+            return Response({
+                "message": "Partial success: some records created, others failed.",
+                "created": created_items,
+                "errors": errors
+            }, status=status.HTTP_207_MULTI_STATUS)
+
+        elif errors:
+            return Response({
+                "message": "Failed to create any records.",
+                "errors": errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            "message": "All attendance records created successfully.",
+            "data": created_items
+        }, status=status.HTTP_200_OK)
+        
+        
 class EventUnitLocationAPIView(APIView):
     def get(self, request):
         locations = EventUnitLocation.objects.all()
@@ -861,7 +979,9 @@ class AttendanceFileDownloadAPIView(APIView):
         except AttendanceFile.DoesNotExist:
             return Response({"error": "File record not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)     
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR) 
+        
+            
 class VolunteersByUnitPostAPIView(APIView):
     def post(self, request):
         unit_id = request.data.get("unit")
@@ -994,6 +1114,7 @@ class VolunteersReportAPIView(APIView):
             for unit in units:
                 volunteers = Volunteer.objects.filter(unit=unit)
 
+                
                 total_male = volunteers.filter(gender='Male').count()
                 total_female = volunteers.filter(gender='Female').count()
                 total_registered = volunteers.filter(is_registered=True).count()
@@ -1005,6 +1126,7 @@ class VolunteersReportAPIView(APIView):
 
                 data.append({
                     "id": unit.id,
+                    "khetra": unit.khetra.khetra if unit.khetra else None,
                     "unit_id": unit.unit_id,   # adjust if your Unit model has a different field
                     "unit_name": unit.unit_name,
                     "total_male": total_male,
@@ -1092,4 +1214,18 @@ class AttendanceReportAPIView(APIView):
         except Exception as e:
             return Response({"status": False, "message": str(e)}, status=500)
 
+class KhetraAPIView(APIView):
 
+    def get(self, request):
+    
+        khetras = Khetra.objects.all()
+        serializer = KhetraSerializer(khetras, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+
+        serializer = KhetraSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({"message": "Khetra added successfully.", "data": serializer.data}, status=201)
+        return Response(serializer.errors, status=200)

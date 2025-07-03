@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Admin, Attendance, AttendanceFile, EventUnitLocation, Events, Location, Register, Unit, Volunteer
+from .models import Admin, Attendance, AttendanceFile, EventUnitLocation, Events, Khetra, Location, Register, Unit, Volunteer
 from django.utils import timezone
 
 
@@ -81,6 +81,7 @@ class EventsSerializer(serializers.ModelSerializer):
         return rep
        
 class UnitSerializer(serializers.ModelSerializer):
+    khetra = serializers.PrimaryKeyRelatedField(queryset=Khetra.objects.all())
     password = serializers.CharField(required=False, write_only=True)
     class Meta:
         model = Unit # Assuming Unit is defined in management.models
@@ -158,13 +159,11 @@ class AttendanceSerializer(serializers.ModelSerializer):
         absent = validated_data.get('absent', False)
         in_time = validated_data.get('in_time')
 
-        # Handle time based on present/absent flags
         if present and not in_time:
             validated_data['in_time'] = timezone.now().time()
         elif absent:
             validated_data['in_time'] = None
 
-        # Generate atd_id like ATD001, ATD002 ...
         last_atd = Attendance.objects.order_by('atd_id').last()
         if last_atd and last_atd.atd_id:
             last_id_num = int(last_atd.atd_id.replace('ATD', ''))
@@ -205,3 +204,9 @@ class EventUnitLocationSerializer(serializers.ModelSerializer):
         model = EventUnitLocation  # Assuming EventUnitLocation is a model related to Events, Unit, and Location
         fields = ['id', 'event', 'unit', 'location']
         read_only_fields = ['id']  # Assuming id is auto-generated
+        
+
+class KhetraSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Khetra  
+        fields = '__all__'    

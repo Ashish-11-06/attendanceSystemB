@@ -50,6 +50,7 @@ class Location(models.Model):
     
 class Unit(models.Model):
     unit_id = models.CharField(max_length=200)
+    khetra = models.ForeignKey('management.Khetra', on_delete=models.CASCADE, null=True)
     unit_name = models.CharField(max_length=250)
     password = models.CharField(max_length=250)   
     # plain_password = models.CharField(max_length=250, null=True, blank=True)
@@ -170,7 +171,7 @@ class EventUnitLocation(models.Model):
     
     class Meta:
         verbose_name_plural = "Event Unit Locations"
-    
 
 
-    
+class Khetra(models.Model):
+    khetra = models.CharField(max_length=200, null=True)
