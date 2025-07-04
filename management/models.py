@@ -82,9 +82,10 @@ class Volunteer(models.Model):
         ('Male', 'Male'),
         ('Female', 'Female'),
         ('Other', 'Other')
-    ])
+    ] , null=True, blank=True)
     unit = models.ForeignKey('management.Unit', on_delete=models.CASCADE, null=True)
     is_registered = models.BooleanField(default=True) 
+    is_active = models.BooleanField(default=True)
     
     def __str__(self):
         return f"{self.name} - {self.volunteer_id} "

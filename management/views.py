@@ -172,7 +172,6 @@ class LoginAPIView(APIView):
     
     
     # Ashish --
-    
 class UploadVolunteerExcelView(APIView):
     def post(self, request, unit_id):
         file = request.FILES.get('file')
@@ -191,6 +190,7 @@ class UploadVolunteerExcelView(APIView):
             for sheet in wb.worksheets:
                 sheet_name = sheet.title.strip().lower()
                 count = 0
+                updated = 0
 
                 gender = None
                 is_registered = True
@@ -235,16 +235,20 @@ class UploadVolunteerExcelView(APIView):
                         if header_field_map.get(idx)
                     }
 
-                    if row_data.get('s_number') == 'X':
-                        continue
+                    # if row_data.get('s_number') == 'X':
+                    #     continue
+                    
+                    is_active = row_data.get('s_number') != 'X'
 
                     name = row_data.get('name', '').strip()
                     if not name:
                         continue
 
                     new_pn = row_data.get('new_personal_number')
-                    if not new_pn:
-                        continue
+                    new_phone = row_data.get('phone', '')
+
+                    if not new_pn and not new_phone:
+                        continue  # Skip if both identifiers are missing
 
                     # Determine unit instance
                     unit = unit_from_url
@@ -255,35 +259,56 @@ class UploadVolunteerExcelView(APIView):
                         except Unit.DoesNotExist:
                             print(f"Unit ID {unit_id_in_row} not found, using default unit")
 
-                    # Check if a volunteer already exists with same unit and new_personal_number
-                    if Volunteer.objects.filter(unit=unit, new_personal_number=new_pn).exists():
-                        print(f"Skipping: Volunteer with new_personal_number={new_pn} already exists in unit {unit.id}")
-                        continue
-
-                    data = {
-                        'name': name,
-                        'email': row_data.get('email'),
-                        'phone': row_data.get('phone'),
-                        'old_personal_number': row_data.get('old_personal_number'),
-                        'new_personal_number': new_pn,
-                        'gender': gender,
-                        'unit': unit.id if unit else None,
-                        'is_registered': is_registered,
-                    }
-
-                    serializer = VolunteerSerializer(data=data)
-                    if serializer.is_valid():
-                        serializer.save()
-                        count += 1
+                    # Try to find existing volunteer
+                    volunteer = None
+                    if new_pn:
+                        volunteer = Volunteer.objects.filter(unit=unit, new_personal_number=new_pn).first()
                     else:
-                        print(f"Validation errors: {serializer.errors}")
+                        volunteer = Volunteer.objects.filter(unit=unit, phone=new_phone, name=name).first()
 
-                inserted[sheet.title] = f"{count} rows imported"
+                    if volunteer:
+                        # Update existing volunteer
+                        volunteer.name = name
+                        volunteer.email = row_data.get('email')
+                        volunteer.phone = new_phone
+                        volunteer.old_personal_number = row_data.get('old_personal_number')
+                        volunteer.gender = gender
+                        volunteer.is_registered = is_registered
+                        volunteer.is_active = is_active
+                        volunteer.save()
+                        updated += 1
+                    else:
+                        # Create new volunteer
+                        data = {
+                            'name': name,
+                            'email': row_data.get('email'),
+                            'phone': new_phone,
+                            'old_personal_number': row_data.get('old_personal_number'),
+                            'new_personal_number': new_pn,
+                            'gender': gender,
+                            'unit': unit.id if unit else None,
+                            'is_registered': is_registered,
+                            'is_active': is_active,
+                        }
 
-            return Response({'message': 'Import successful', 'details': inserted}, status=status.HTTP_201_CREATED)
+                        serializer = VolunteerSerializer(data=data)
+                        if serializer.is_valid():
+                            serializer.save()
+                            count += 1
+                        else:
+                            print(f"Validation errors: {serializer.errors}")
+
+                inserted[sheet.title] = f"{count} inserted, {updated} updated"
+
+            return Response({'message': 'Volinteers data imported successfully!', 'details': inserted}, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            import traceback
+            traceback.print_exc()
+            raise e
+
+
+
 class EventsAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -618,13 +643,12 @@ class UnitAPIView(APIView):
 class VolunteerAPIView(APIView):
     def get(self, request, volunteer_id=None):
         if volunteer_id:
-            # Get single unit by id
             volunteer = get_object_or_404(Volunteer, volunteer_id=volunteer_id)
             serializer = VolunteerSerializer(volunteer)
             return Response(serializer.data, status=status.HTTP_200_OK)
         # Get all volunteers
         else:
-            volunteers = Volunteer.objects.all()
+            volunteers = Volunteer.objects.filter(is_active=True)
             serializer = VolunteerSerializer(volunteers, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -912,7 +936,7 @@ class DataFechEvenUnitIdAPIView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({
-            "message": "All attendance records created successfully.",
+            "message": "All attendance records updated successfully.",
             "data": created_items
         }, status=status.HTTP_200_OK)
         
