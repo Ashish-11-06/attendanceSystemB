@@ -50,6 +50,7 @@ class Location(models.Model):
     
 class Unit(models.Model):
     unit_id = models.CharField(max_length=200)
+    khetra = models.ForeignKey('management.Khetra', on_delete=models.CASCADE, null=True)
     unit_name = models.CharField(max_length=250)
     password = models.CharField(max_length=250)   
     # plain_password = models.CharField(max_length=250, null=True, blank=True)
@@ -81,9 +82,10 @@ class Volunteer(models.Model):
         ('Male', 'Male'),
         ('Female', 'Female'),
         ('Other', 'Other')
-    ])
+    ] , null=True, blank=True)
     unit = models.ForeignKey('management.Unit', on_delete=models.CASCADE, null=True)
     is_registered = models.BooleanField(default=True) 
+    is_active = models.BooleanField(default=True)
     
     def __str__(self):
         return f"{self.name} - {self.volunteer_id} "
@@ -170,7 +172,7 @@ class EventUnitLocation(models.Model):
     
     class Meta:
         verbose_name_plural = "Event Unit Locations"
-    
 
 
-    
+class Khetra(models.Model):
+    khetra = models.CharField(max_length=200, null=True)
