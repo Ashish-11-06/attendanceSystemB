@@ -96,7 +96,7 @@ class VolunteerSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Volunteer
-        fields = ['id', 'volunteer_id', 'name', 'email', 'phone', 'old_personal_number', 'new_personal_number', 'gender', 'unit', 'is_registered']
+        fields = ['id', 'volunteer_id', 'name', 'email', 'phone', 'old_personal_number', 'new_personal_number', 'gender', 'unit', 'is_registered', 'is_active']
         read_only_fields = ('volunteer_id',)
 
     def create(self, validated_data):
