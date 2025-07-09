@@ -824,7 +824,7 @@ class AttendanceFileAPIView(APIView):
 class TotalCountAPIView(APIView):
     def get(self, request):
         total_events = Events.objects.count()
-        total_volunteers = Volunteer.objects.count()
+        total_volunteers = Volunteer.objects.filter( is_registered=True).count()
         total_units = Unit.objects.count()
         total_locations = Location.objects.count()
 
