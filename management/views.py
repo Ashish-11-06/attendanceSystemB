@@ -23,8 +23,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from management.models import Admin, Attendance, AttendanceFile, EventUnitLocation, Events, Location, Register, Unit, Volunteer
-from management.serializers import AdminSerializer, AttendanceFileSerializer, AttendanceSerializer, EventUnitLocationSerializer, EventsSerializer, LocationSerializer, LoginSerializer, RegisterSerializer, UnitSerializer, VolunteerSerializer
+from management.models import Admin, Attendance, AttendanceFile, EventUnitLocation, Events, Khetra, Location, Register, Unit, Volunteer
+from management.serializers import AdminSerializer, AttendanceFileSerializer, AttendanceSerializer, EventUnitLocationSerializer, EventsSerializer, KhetraSerializer, LocationSerializer, LoginSerializer, RegisterSerializer, UnitSerializer, VolunteerSerializer
 from management.utils import extract_table_data_from_image, parse_sewadal_adhikari_data,  send_otp_email
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework.permissions import IsAuthenticated
@@ -172,14 +172,12 @@ class LoginAPIView(APIView):
     
     
     # Ashish --
-    
 class UploadVolunteerExcelView(APIView):
     def post(self, request, unit_id):
         file = request.FILES.get('file')
         if not file:
             return Response({'error': 'No file uploaded'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Use the unit_id from the URL directly
         try:
             unit_from_url = Unit.objects.get(id=unit_id)
         except Unit.DoesNotExist:
@@ -192,8 +190,8 @@ class UploadVolunteerExcelView(APIView):
             for sheet in wb.worksheets:
                 sheet_name = sheet.title.strip().lower()
                 count = 0
+                updated = 0
 
-                # Detect gender and registration status based on sheet name
                 gender = None
                 is_registered = True
 
@@ -208,10 +206,8 @@ class UploadVolunteerExcelView(APIView):
                     gender = 'Female'
                     is_registered = False
 
-                # Step 1: Get headers from row 3
                 raw_headers = [str(cell.value).strip().lower() if cell.value else '' for cell in sheet[3]]
 
-                # Normalize column_map keys to lowercase too
                 column_map = {
                     'new p#': 'new_personal_number',
                     'old p#': 'old_personal_number',
@@ -220,43 +216,42 @@ class UploadVolunteerExcelView(APIView):
                     'email': 'email',
                     'volunteer id': 'volunteer_id',
                     'unit id': 'unit_id',
-                    's#': 's_number'  # Add S# to the column map
+                    's#': 's_number'
                 }
 
-                # Map column index to model field using normalized header
-                header_field_map = {}
-                for idx, header in enumerate(raw_headers):
-                    field = column_map.get(header)
-                    if field:
-                        header_field_map[idx] = field
-
-                # print("Header field map:", header_field_map)
+                header_field_map = {
+                    idx: column_map.get(header)
+                    for idx, header in enumerate(raw_headers)
+                    if column_map.get(header)
+                }
 
                 for row in sheet.iter_rows(min_row=4, values_only=True):
                     if not any(row):
                         continue
 
-                    row_data = {}
-                    for idx, value in enumerate(row):
-                        field_name = header_field_map.get(idx)
-                        if field_name:
-                            row_data[field_name] = value
+                    row_data = {
+                        header_field_map[idx]: value
+                        for idx, value in enumerate(row)
+                        if header_field_map.get(idx)
+                    }
 
-                    # Check if S# is 'X' and skip the row if it is
-                    s_number = row_data.get('s_number')
-                    if s_number == 'X':
-                        print("Skipping row due to S# being 'X'")
-                        continue  # Skip this row if S# is 'X'
+                    # if row_data.get('s_number') == 'X':
+                    #     continue
+                    
+                    is_active = row_data.get('s_number') != 'X'
 
-                    # Clean and validate data
                     name = row_data.get('name', '').strip()
-
                     if not name:
-                        # print("Skipping row due to empty name")
-                        continue  # Skip this row if name is empty
+                        continue
+
+                    new_pn = row_data.get('new_personal_number')
+                    new_phone = row_data.get('phone', '')
+
+                    if not new_pn and not new_phone:
+                        continue  # Skip if both identifiers are missing
 
                     # Determine unit instance
-                    unit = unit_from_url  # Use the unit from the URL directly
+                    unit = unit_from_url
                     unit_id_in_row = row_data.get('unit_id')
                     if unit_id_in_row:
                         try:
@@ -264,31 +259,55 @@ class UploadVolunteerExcelView(APIView):
                         except Unit.DoesNotExist:
                             print(f"Unit ID {unit_id_in_row} not found, using default unit")
 
-                    data = {
-                        'name': name,
-                        'email': row_data.get('email'),
-                        'phone': row_data.get('phone'),
-                        'old_personal_number': row_data.get('old_personal_number'),
-                        'new_personal_number': row_data.get('new_personal_number'),
-                        'gender': gender,  # Use the gender determined by the sheet name
-                        'unit': unit.id if unit else None,
-                        'is_registered': is_registered,
-                    }
-
-                    # print("Row data passed to serializer:", data)
-                    serializer = VolunteerSerializer(data=data)
-                    if serializer.is_valid():
-                        serializer.save()
-                        count += 1
+                    # Try to find existing volunteer
+                    volunteer = None
+                    if new_pn:
+                        volunteer = Volunteer.objects.filter(unit=unit, new_personal_number=new_pn).first()
                     else:
-                        print(f"Validation errors: {serializer.errors}")
+                        volunteer = Volunteer.objects.filter(unit=unit, phone=new_phone, name=name).first()
 
-                inserted[sheet.title] = f"{count} rows imported"
+                    if volunteer:
+                        # Update existing volunteer
+                        volunteer.name = name
+                        volunteer.email = row_data.get('email')
+                        volunteer.phone = new_phone
+                        volunteer.old_personal_number = row_data.get('old_personal_number')
+                        volunteer.gender = gender
+                        volunteer.is_registered = is_registered
+                        volunteer.is_active = is_active
+                        volunteer.save()
+                        updated += 1
+                    else:
+                        # Create new volunteer
+                        data = {
+                            'name': name,
+                            'email': row_data.get('email'),
+                            'phone': new_phone,
+                            'old_personal_number': row_data.get('old_personal_number'),
+                            'new_personal_number': new_pn,
+                            'gender': gender,
+                            'unit': unit.id if unit else None,
+                            'is_registered': is_registered,
+                            'is_active': is_active,
+                        }
 
-            return Response({'message': 'Import successful', 'details': inserted}, status=status.HTTP_201_CREATED)
+                        serializer = VolunteerSerializer(data=data)
+                        if serializer.is_valid():
+                            serializer.save()
+                            count += 1
+                        else:
+                            print(f"Validation errors: {serializer.errors}")
+
+                inserted[sheet.title] = f"{count} inserted, {updated} updated"
+
+            return Response({'message': 'Volinteers data imported successfully!', 'details': inserted}, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            import traceback
+            traceback.print_exc()
+            raise e
+
+
 
 class EventsAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -362,21 +381,42 @@ class EventsAPIView(APIView):
 
             # Save EventUnitLocation entries
             for loc in locations_data:
-                location_id = loc.get("location_id")
+                location = None
                 unit_ids = loc.get("unit", [])
-                try:
-                    location = Location.objects.get(id=location_id)
-                    for unit_id in unit_ids:
+
+                # Case 1: Existing location by ID
+                if "location_id" in loc:
+                    try:
+                        location = Location.objects.get(id=loc["location_id"])
+                    except Location.DoesNotExist:
+                        return Response({"error": f"Location ID {loc['location_id']} not found."}, status=400)
+
+                # Case 2: New location to be created
+                elif "location" in loc:
+                    location_data = loc["location"]
+                    # Generate unique location_id for the Location model's field
+                    unique_location_id = str(uuid.uuid4())[:8]
+                    location = Location.objects.create(
+                        location_id=unique_location_id,
+                        state=location_data.get("state", ""),
+                        city=location_data.get("city", ""),
+                        address=location_data.get("address", "")
+                    )
+
+                else:
+                    return Response({"error": "Each location must include either 'location_id' or 'location'."}, status=400)
+
+                # Link units to the selected/created location
+                for unit_id in unit_ids:
+                    try:
                         unit = Unit.objects.get(id=unit_id)
                         EventUnitLocation.objects.create(
                             event=event,
                             location=location,
                             unit=unit
                         )
-                except Location.DoesNotExist:
-                    return Response({"error": f"Location ID {location_id} not found."}, status=400)
-                except Unit.DoesNotExist:
-                    return Response({"error": f"Unit ID {unit_id} not found."}, status=400)
+                    except Unit.DoesNotExist:
+                        return Response({"error": f"Unit ID {unit_id} not found."}, status=400)
 
             # Prepare full response
             response_data = {
@@ -603,13 +643,12 @@ class UnitAPIView(APIView):
 class VolunteerAPIView(APIView):
     def get(self, request, volunteer_id=None):
         if volunteer_id:
-            # Get single unit by id
             volunteer = get_object_or_404(Volunteer, volunteer_id=volunteer_id)
             serializer = VolunteerSerializer(volunteer)
             return Response(serializer.data, status=status.HTTP_200_OK)
         # Get all volunteers
         else:
-            volunteers = Volunteer.objects.all()
+            volunteers = Volunteer.objects.filter(is_active=True)
             serializer = VolunteerSerializer(volunteers, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -722,21 +761,65 @@ class AttendanceAPIView(APIView):
         }, status=status.HTTP_400_BAD_REQUEST)
 
     
-    def put(self, request, attendance_id):
-        attendance = get_object_or_404(Attendance, atd_id=attendance_id)  # Use atd_id not pk
-        serializer = AttendanceSerializer(attendance, data=request.data)
+    def put(self, request):
+        is_many = isinstance(request.data, list)
+        data = request.data if is_many else [request.data]
 
-        if serializer.is_valid():
-            serializer.save()
+        updated_items = []
+        errors = []
+
+        for item in data:
+            event_id = item.get('event')
+            unit_id = item.get('unit')
+            volunteer_id = item.get('volunteer')  # This is internal DB ID (int)
+
+            if not event_id or not unit_id or not volunteer_id:
+                errors.append({
+                    "message": "Missing 'event', 'unit', or 'volunteer' (ID) in one of the items",
+                    "data": item
+                })
+                continue
+
+            attendance = Attendance.objects.filter(
+                event_id=event_id,
+                unit_id=unit_id,
+                volunteer_id=volunteer_id  # direct match with FK ID
+            ).first()
+
+            if not attendance:
+                errors.append({
+                    "message": f"Attendance record not found for event {event_id}, unit {unit_id}, and volunteer ID {volunteer_id}",
+                    "data": item
+                })
+                continue
+
+            serializer = AttendanceSerializer(attendance, data=item)
+            if serializer.is_valid():
+                serializer.save()
+                updated_items.append(serializer.data)
+            else:
+                errors.append({
+                    "message": f"Validation failed for volunteer ID {volunteer_id}",
+                    "errors": serializer.errors
+                })
+
+        if errors and updated_items:
             return Response({
-                "message": "Attendance updated successfully.",
-                "data": serializer.data
-            }, status=status.HTTP_200_OK)
+                "message": "Partial success: some attendance records updated, some failed.",
+                "updated": updated_items,
+                "errors": errors
+            }, status=status.HTTP_207_MULTI_STATUS)
+
+        elif errors:
+            return Response({
+                "message": "Failed to update attendance records.",
+                "errors": errors
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({
-            "message": "Failed to update attendance.",
-            "errors": serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
+            "message": "All attendance records updated successfully.",
+            "data": updated_items
+        }, status=status.HTTP_200_OK)
 
 
 class AttendanceFileAPIView(APIView):
@@ -805,6 +888,59 @@ class DataFechEvenUnitIdAPIView(APIView):
         else:
             return Response({"error": "unit_id and event_id are required."}, status=status.HTTP_400_BAD_REQUEST) 
         
+    def put(self, request):
+        data = request.data
+        if not isinstance(data, list) or not data:
+            return Response({
+                "message": "Expected a non-empty list of attendance records."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Extract event and unit from first item
+        event_id = data[0].get('event')
+        unit_id = data[0].get('unit')
+
+        if not event_id or not unit_id:
+            return Response({
+                "message": "Missing 'event' or 'unit' in the data."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Delete existing records for this event and unit
+        Attendance.objects.filter(event_id=event_id, unit_id=unit_id).delete()
+
+        created_items = []
+        errors = []
+
+        for index, item in enumerate(data):
+            serializer = AttendanceSerializer(data=item)
+            if serializer.is_valid():
+                serializer.save()
+                created_items.append(serializer.data)
+            else:
+                errors.append({
+                    "index": index,
+                    "errors": serializer.errors,
+                    "data": item
+                })
+
+        if errors and created_items:
+            return Response({
+                "message": "Partial success: some records created, others failed.",
+                "created": created_items,
+                "errors": errors
+            }, status=status.HTTP_207_MULTI_STATUS)
+
+        elif errors:
+            return Response({
+                "message": "Failed to create any records.",
+                "errors": errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            "message": "All attendance records updated successfully.",
+            "data": created_items
+        }, status=status.HTTP_200_OK)
+        
+        
 class EventUnitLocationAPIView(APIView):
     def get(self, request):
         locations = EventUnitLocation.objects.all()
@@ -861,7 +997,9 @@ class AttendanceFileDownloadAPIView(APIView):
         except AttendanceFile.DoesNotExist:
             return Response({"error": "File record not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)     
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR) 
+        
+            
 class VolunteersByUnitPostAPIView(APIView):
     def post(self, request):
         unit_id = request.data.get("unit")
@@ -994,6 +1132,7 @@ class VolunteersReportAPIView(APIView):
             for unit in units:
                 volunteers = Volunteer.objects.filter(unit=unit)
 
+                
                 total_male = volunteers.filter(gender='Male').count()
                 total_female = volunteers.filter(gender='Female').count()
                 total_registered = volunteers.filter(is_registered=True).count()
@@ -1005,6 +1144,7 @@ class VolunteersReportAPIView(APIView):
 
                 data.append({
                     "id": unit.id,
+                    "khetra": unit.khetra.khetra if unit.khetra else None,
                     "unit_id": unit.unit_id,   # adjust if your Unit model has a different field
                     "unit_name": unit.unit_name,
                     "total_male": total_male,
@@ -1092,4 +1232,18 @@ class AttendanceReportAPIView(APIView):
         except Exception as e:
             return Response({"status": False, "message": str(e)}, status=500)
 
+class KhetraAPIView(APIView):
 
+    def get(self, request):
+    
+        khetras = Khetra.objects.all()
+        serializer = KhetraSerializer(khetras, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+
+        serializer = KhetraSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({"message": "Khetra added successfully.", "data": serializer.data}, status=201)
+        return Response(serializer.errors, status=200)
