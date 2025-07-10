@@ -848,7 +848,7 @@ class AttendanceFileAPIView(APIView):
 class TotalCountAPIView(APIView):
     def get(self, request):
         total_events = Events.objects.count()
-        total_volunteers = Volunteer.objects.filter( is_registered=True).count()
+        total_volunteers = Volunteer.objects.filter( is_active=True).count()
         total_units = Unit.objects.count()
         total_locations = Location.objects.count()
 
@@ -1132,27 +1132,40 @@ class VolunteersReportAPIView(APIView):
             for unit in units:
                 volunteers = Volunteer.objects.filter(unit=unit)
 
-                
+                # Counts for all volunteers (active + inactive)
                 total_male = volunteers.filter(gender='Male').count()
                 total_female = volunteers.filter(gender='Female').count()
-                total_registered = volunteers.filter(is_registered=True).count()
+                # total_registered = volunteers.filter(is_registered=True).count()
+                total_registered = total_male + total_female
+                
                 total_unregistered = volunteers.filter(is_registered=False).count()
                 unregistered_male = volunteers.filter(is_registered=False, gender='Male').count()
                 unregistered_female = volunteers.filter(is_registered=False, gender='Female').count()
+                # grand_total = volunteers.count()  
+                
+                grand_total = total_registered + total_unregistered
 
-                grand_total = (total_male + total_female + unregistered_male + unregistered_female)
+                # Counts for active volunteers only
+                total_active = volunteers.filter(is_active=True).count()
+                print((total_active))
+                # Print names of all active volunteers for testing
+                active_volunteers = volunteers.filter(is_active=True)
+                # print("Active volunteer names:", [v.name for v in active_volunteers])
 
                 data.append({
                     "id": unit.id,
                     "khetra": unit.khetra.khetra if unit.khetra else None,
-                    "unit_id": unit.unit_id,   # adjust if your Unit model has a different field
+                    "unit_id": unit.unit_id,
                     "unit_name": unit.unit_name,
+
                     "total_male": total_male,
                     "total_female": total_female,
                     "total_registered": total_registered,
                     "total_unregistered": total_unregistered,
                     "unregistered_male": unregistered_male,
                     "unregistered_female": unregistered_female,
+
+                    "total_active": total_active,
                     "grand_total": grand_total
                 })
 
@@ -1160,7 +1173,9 @@ class VolunteersReportAPIView(APIView):
 
         except Exception as e:
             return Response({"status": False, "message": str(e)}, status=500)
-        
+     
+     
+     
 from collections import defaultdict
 
 class AttendanceReportAPIView(APIView):
@@ -1247,3 +1262,34 @@ class KhetraAPIView(APIView):
             serializer.save()
             return Response({"message": "Khetra added successfully.", "data": serializer.data}, status=201)
         return Response(serializer.errors, status=200)
+    
+    
+class OverallVolunteersStatsAPIView(APIView):
+    def get(self, request):
+        try:
+            volunteers = Volunteer.objects.all()
+
+            total_male = volunteers.filter(gender='Male').count()
+            total_female = volunteers.filter(gender='Female').count()
+            total_registered = volunteers.filter(is_registered=True).count()
+            total_unregistered = volunteers.filter(is_registered=False).count()
+            unregistered_male = volunteers.filter(is_registered=False, gender='Male').count()
+            unregistered_female = volunteers.filter(is_registered=False, gender='Female').count()
+            # total_active = volunteers.filter(is_active=True).count()
+            # total_inactive = volunteers.filter(is_active=False).count()
+            # grand_total = volunteers.count()
+
+            return Response({
+                "total_male": total_male,
+                "total_female": total_female,
+                "total_registered": total_registered,
+                "total_unregistered": total_unregistered,
+                "unregistered_male": unregistered_male,
+                "unregistered_female": unregistered_female,
+                # "total_active": total_active,
+                # "total_inactive": total_inactive,
+                # "grand_total": grand_total
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"status": False, "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

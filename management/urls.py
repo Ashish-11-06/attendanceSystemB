@@ -1,6 +1,6 @@
 from django.urls import path
 
-from management.views import AdminAPIView, AttendanceAPIView, AttendanceFileAPIView, AttendanceFileDownloadAPIView, AttendanceReportAPIView, DataFechEvenUnitIdAPIView, EventsAPIView, KhetraAPIView, LocationAPIView, LoginAPIView, RegisterAPIView, TotalCountAPIView, UnitAPIView, UploadFileExtractTextAPIView, UploadVolunteerExcelView, VerifyOTPAPIView, VolunteerAPIView, VolunteersByUnitPostAPIView, VolunteersReportAPIView
+from management.views import AdminAPIView, AttendanceAPIView, AttendanceFileAPIView, AttendanceFileDownloadAPIView, AttendanceReportAPIView, DataFechEvenUnitIdAPIView, EventsAPIView, KhetraAPIView, LocationAPIView, LoginAPIView, OverallVolunteersStatsAPIView, RegisterAPIView, TotalCountAPIView, UnitAPIView, UploadFileExtractTextAPIView, UploadVolunteerExcelView, VerifyOTPAPIView, VolunteerAPIView, VolunteersByUnitPostAPIView, VolunteersReportAPIView
 
 urlpatterns = [
     path('register/', RegisterAPIView.as_view(), name='register-unit'),
@@ -52,6 +52,8 @@ urlpatterns = [
     path('attendance-report/<str:event_id>/', AttendanceReportAPIView.as_view(), name='attendance-report-api'),
     
     path('khetras/', KhetraAPIView.as_view(), name='khetra-list-create'),
+    
+     path('volunteers/overall-stats/', OverallVolunteersStatsAPIView.as_view(), name='overall-volunteer-stats'),
 
     
        
