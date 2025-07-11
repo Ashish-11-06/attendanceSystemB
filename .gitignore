@@ -7,6 +7,10 @@ __pycache__/
 *.eggs/
 *.log
 
+__pycache__/
+*.pyc
+
+
 # Django-specific files
 media/
 staticfiles/
