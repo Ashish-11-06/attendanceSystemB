@@ -50,7 +50,7 @@ class Location(models.Model):
     
 class Unit(models.Model):
     unit_id = models.CharField(max_length=200)
-    khetra = models.ForeignKey('management.Khetra', on_delete=models.CASCADE, null=True)
+    khetra = models.ForeignKey('management.Khetra', on_delete=models.CASCADE, null=True, blank=True)
     unit_name = models.CharField(max_length=250)
     password = models.CharField(max_length=250)   
     # plain_password = models.CharField(max_length=250, null=True, blank=True)
@@ -58,6 +58,7 @@ class Unit(models.Model):
     otp = models.CharField(max_length=6, blank=True, null=True)
     phone = models.CharField(max_length=50, null=True, blank=True)
     location = models.CharField(max_length=255, null=True)
+
 
     @property
     def is_authenticated(self):
@@ -86,9 +87,16 @@ class Volunteer(models.Model):
     unit = models.ForeignKey('management.Unit', on_delete=models.CASCADE, null=True)
     is_registered = models.BooleanField(default=True) 
     is_active = models.BooleanField(default=True)
+    already_updated = models.BooleanField(default=False)
+    
     
     def __str__(self):
         return f"{self.name} - {self.volunteer_id} "
+    
+    def save(self, *args, **kwargs):
+        # Mark attendance as already updated when saved
+        self.already_updated = True
+        super().save(*args, **kwargs)
     
 class Admin(models.Model):
     admin_id = models.CharField(max_length=200)
@@ -117,16 +125,20 @@ class Attendance(models.Model):
     event = models.ForeignKey('management.Events', on_delete=models.CASCADE, null=True)
     unit = models.ForeignKey('management.Unit', on_delete=models.CASCADE, null=True)
     date = models.DateField()
+    date_vise = models.DateField(null=True, blank=True)
     in_time = models.TimeField(null=True, blank=True)
     out_time = models.TimeField(null=True, blank=True)
     present = models.BooleanField(default=False)
     absent = models.BooleanField(default=False)
     remark = models.CharField(max_length=250, null=True, blank=True)
+    already_updated = models.BooleanField(default=False)
     
     def __str__(self):
         return f" {self.date} "
     
     def save(self, *args, **kwargs):
+        # Mark attendance as already updated when saved
+        self.already_updated = True
         # Manage mutually exclusive flags
         if self.present:
             self.absent = False
@@ -144,7 +156,8 @@ class AttendanceFile(models.Model):
     file_name = models.CharField(max_length=250)
     file = models.FileField(upload_to='attendance_files/')
     event = models.ForeignKey('management.Events', on_delete=models.CASCADE, null=True)
-    unit = models.ForeignKey('management.Unit', on_delete=models.CASCADE)
+    unit = models.ForeignKey('management.Unit', on_delete=models.CASCADE, null=True)
+    date = models.DateField(null=True, blank=True)
     
     uploaded_at = models.DateTimeField(auto_now_add=True)
     

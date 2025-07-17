@@ -1,6 +1,6 @@
 from django.urls import path
 
-from management.views import AdminAPIView, AttendanceAPIView, AttendanceFileAPIView, AttendanceFileDownloadAPIView, AttendanceReportAPIView, DataFechEvenUnitIdAPIView, EventsAPIView, KhetraAPIView, LocationAPIView, LoginAPIView, OverallVolunteersStatsAPIView, RegisterAPIView, TotalCountAPIView, UnitAPIView, UploadFileExtractTextAPIView, UploadVolunteerExcelView, VerifyOTPAPIView, VolunteerAPIView, VolunteersByUnitPostAPIView, VolunteersReportAPIView
+from management.views import AdminAPIView, AttendanceAPIView, AttendanceFileAPIView, AttendanceFileDownloadAPIView, AttendanceFileUploadView, AttendanceReportAPIView, DataFechEvenUnitIdAPIView, EventsAPIView, KhetraAPIView, LocationAPIView, LoginAPIView, OverallVolunteersStatsAPIView, RegisterAPIView, TotalCountAPIView, UnitAPIView, UploadFileExtractTextAPIView, UploadVolunteerExcelView, VerifyOTPAPIView, VolunteerAPIView, VolunteersByUnitPostAPIView, VolunteersPendingAttendanceAPIView, VolunteersReportAPIView
 
 urlpatterns = [
     path('register/', RegisterAPIView.as_view(), name='register-unit'),
@@ -34,6 +34,7 @@ urlpatterns = [
     
     path('attendance-files/', AttendanceFileAPIView.as_view(), name='attendance-file-api'),
     path('attendance-file/<str:attendance_file_id>/', AttendanceFileAPIView.as_view()),
+    path('attendance/file/link/', AttendanceFileUploadView.as_view(), name='attendance-file-upload'),
     
     path('total-count/', TotalCountAPIView.as_view(), name='total-count-api'),
     
@@ -54,6 +55,8 @@ urlpatterns = [
     path('khetras/', KhetraAPIView.as_view(), name='khetra-list-create'),
     
      path('volunteers/overall-stats/', OverallVolunteersStatsAPIView.as_view(), name='overall-volunteer-stats'),
+     
+     path('volunteers/pending-attendance/', VolunteersPendingAttendanceAPIView.as_view(), name='pending-volunteer-attendance'),
 
     
        
