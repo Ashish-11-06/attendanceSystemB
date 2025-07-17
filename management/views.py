@@ -9,10 +9,14 @@ from tkinter import Image
 import pandas as pd 
 import uuid
 from wsgiref.util import FileWrapper 
+from datetime import datetime
 import zipfile
 from django.http import FileResponse, StreamingHttpResponse
 import openpyxl
 from pdf2image import convert_from_path
+from rest_framework.parsers import MultiPartParser, FormParser
+from django.utils.dateparse import parse_date
+from django.db.models import Q
 import pytesseract
 import imghdr
 import cv2
@@ -24,7 +28,7 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from management.models import Admin, Attendance, AttendanceFile, EventUnitLocation, Events, Khetra, Location, Register, Unit, Volunteer
-from management.serializers import AdminSerializer, AttendanceFileSerializer, AttendanceSerializer, EventUnitLocationSerializer, EventsSerializer, KhetraSerializer, LocationSerializer, LoginSerializer, RegisterSerializer, UnitSerializer, VolunteerSerializer
+from management.serializers import AdminSerializer, AttendanceFileSerializer, AttendanceFileUploadSerializer, AttendanceSerializer, EventUnitLocationSerializer, EventsSerializer, KhetraSerializer, LocationSerializer, LoginSerializer, RegisterSerializer, UnitSerializer, VolunteerSerializer
 from management.utils import extract_table_data_from_image, parse_sewadal_adhikari_data,  send_otp_email
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework.permissions import IsAuthenticated
@@ -170,8 +174,148 @@ class LoginAPIView(APIView):
 
         return Response({"error": "Invalid user_type"}, status=status.HTTP_400_BAD_REQUEST) 
     
+  
+  
     
     # Ashish --
+# class UploadVolunteerExcelView(APIView):
+#     def post(self, request, unit_id):
+#         file = request.FILES.get('file')
+#         if not file:
+#             return Response({'error': 'No file uploaded'}, status=status.HTTP_400_BAD_REQUEST)
+
+#         try:
+#             unit_from_url = Unit.objects.get(id=unit_id)
+#         except Unit.DoesNotExist:
+#             return Response({'error': f"Unit ID {unit_id} not found"}, status=status.HTTP_400_BAD_REQUEST)
+
+#         try:
+#             wb = openpyxl.load_workbook(file)
+#             inserted = {}
+
+#             for sheet in wb.worksheets:
+#                 sheet_name = sheet.title.strip().lower()
+#                 count = 0
+#                 updated = 0
+
+#                 gender = None
+#                 is_registered = True
+
+#                 if sheet_name == 'gents':
+#                     gender = 'Male'
+#                 elif sheet_name == 'ladies':
+#                     gender = 'Female'
+#                 elif sheet_name == 'un-reg gents':
+#                     gender = 'Male'
+#                     is_registered = False
+#                 elif sheet_name == 'un-reg ladies':
+#                     gender = 'Female'
+#                     is_registered = False
+
+#                 raw_headers = [str(cell.value).strip().lower() if cell.value else '' for cell in sheet[3]]
+
+#                 column_map = {
+#                     'new p#': 'new_personal_number',
+#                     'old p#': 'old_personal_number',
+#                     'name': 'name',
+#                     'contact no.': 'phone',
+#                     'email': 'email',
+#                     'volunteer id': 'volunteer_id',
+#                     'unit id': 'unit_id',
+#                     's#': 's_number'
+#                 }
+
+#                 header_field_map = {
+#                     idx: column_map.get(header)
+#                     for idx, header in enumerate(raw_headers)
+#                     if column_map.get(header)
+#                 }
+
+#                 for row in sheet.iter_rows(min_row=4, values_only=True):
+#                     if not any(row):
+#                         continue
+
+#                     row_data = {
+#                         header_field_map[idx]: value
+#                         for idx, value in enumerate(row)
+#                         if header_field_map.get(idx)
+#                     }
+
+#                     # if row_data.get('s_number') == 'X':
+#                     #     continue
+                    
+#                     is_active = row_data.get('s_number') != 'X'
+
+#                     name = row_data.get('name', '').strip()
+#                     if not name:
+#                         continue
+
+#                     new_pn = row_data.get('new_personal_number')
+#                     new_phone = row_data.get('phone', '')
+
+#                     if not new_pn and not new_phone:
+#                         continue  # Skip if both identifiers are missing
+
+#                     # Determine unit instance
+#                     unit = unit_from_url
+#                     unit_id_in_row = row_data.get('unit_id')
+#                     if unit_id_in_row:
+#                         try:
+#                             unit = Unit.objects.get(id=unit_id_in_row)
+#                         except Unit.DoesNotExist:
+#                             print(f"Unit ID {unit_id_in_row} not found, using default unit")
+
+#                     # Try to find existing volunteer
+#                     volunteer = None
+#                     if new_pn:
+#                         volunteer = Volunteer.objects.filter(unit=unit, new_personal_number=new_pn).first()
+#                     else:
+#                         volunteer = Volunteer.objects.filter(unit=unit, phone=new_phone, name=name).first()
+
+#                     if volunteer:
+#                         # Update existing volunteer
+#                         volunteer.name = name
+#                         volunteer.email = row_data.get('email')
+#                         volunteer.phone = new_phone
+#                         volunteer.old_personal_number = row_data.get('old_personal_number')
+#                         volunteer.gender = gender
+#                         volunteer.is_registered = is_registered
+#                         volunteer.is_active = is_active
+#                         volunteer.save()
+#                         updated += 1
+#                     else:
+#                         # Create new volunteer
+#                         data = {
+#                             'name': name,
+#                             'email': row_data.get('email'),
+#                             'phone': new_phone,
+#                             'old_personal_number': row_data.get('old_personal_number'),
+#                             'new_personal_number': new_pn,
+#                             'gender': gender,
+#                             'unit': unit.id if unit else None,
+#                             'is_registered': is_registered,
+#                             'is_active': is_active,
+#                         }
+
+#                         serializer = VolunteerSerializer(data=data)
+#                         if serializer.is_valid():
+#                             serializer.save()
+#                             count += 1
+#                         else:
+#                             # print(f"Validation errors: {serializer.errors}")
+#                             print(f"Row skipped due to validation errors: {serializer.errors}, data: {data}")
+
+
+#                 inserted[sheet.title] = f"{count} inserted, {updated} updated"
+
+#             return Response({'message': 'Volinteers data imported successfully!', 'details': inserted}, status=status.HTTP_201_CREATED)
+
+#         except Exception as e:
+#             import traceback
+#             traceback.print_exc()
+#             raise e
+
+
 class UploadVolunteerExcelView(APIView):
     def post(self, request, unit_id):
         file = request.FILES.get('file')
@@ -186,9 +330,16 @@ class UploadVolunteerExcelView(APIView):
         try:
             wb = openpyxl.load_workbook(file)
             inserted = {}
+            inserted_names = set()  # ✅ Track inserted names globally
 
             for sheet in wb.worksheets:
                 sheet_name = sheet.title.strip().lower()
+                
+                 # ✅ Skip Adhikaris sheet completely
+                if sheet_name == 'adhikaris':
+                    inserted[sheet.title] = "Skipped (Adhikaris sheet)"
+                    continue
+                
                 count = 0
                 updated = 0
 
@@ -235,14 +386,14 @@ class UploadVolunteerExcelView(APIView):
                         if header_field_map.get(idx)
                     }
 
-                    # if row_data.get('s_number') == 'X':
-                    #     continue
-                    
                     is_active = row_data.get('s_number') != 'X'
-
                     name = row_data.get('name', '').strip()
                     if not name:
                         continue
+
+                    # ✅ Skip duplicates in Adhikaris sheet
+                    if sheet.title.strip().lower() == 'adhikaris' and name.lower() in inserted_names:
+                        continue  # Skip this row
 
                     new_pn = row_data.get('new_personal_number')
                     new_phone = row_data.get('phone', '')
@@ -250,7 +401,6 @@ class UploadVolunteerExcelView(APIView):
                     if not new_pn and not new_phone:
                         continue  # Skip if both identifiers are missing
 
-                    # Determine unit instance
                     unit = unit_from_url
                     unit_id_in_row = row_data.get('unit_id')
                     if unit_id_in_row:
@@ -259,7 +409,6 @@ class UploadVolunteerExcelView(APIView):
                         except Unit.DoesNotExist:
                             print(f"Unit ID {unit_id_in_row} not found, using default unit")
 
-                    # Try to find existing volunteer
                     volunteer = None
                     if new_pn:
                         volunteer = Volunteer.objects.filter(unit=unit, new_personal_number=new_pn).first()
@@ -277,6 +426,7 @@ class UploadVolunteerExcelView(APIView):
                         volunteer.is_active = is_active
                         volunteer.save()
                         updated += 1
+                        inserted_names.add(name.lower())  # ✅ track updated names too
                     else:
                         # Create new volunteer
                         data = {
@@ -295,17 +445,20 @@ class UploadVolunteerExcelView(APIView):
                         if serializer.is_valid():
                             serializer.save()
                             count += 1
+                            inserted_names.add(name.lower())  # ✅ track inserted names
                         else:
-                            print(f"Validation errors: {serializer.errors}")
+                            print(f"Row skipped due to validation errors: {serializer.errors}, data: {data}")
+
 
                 inserted[sheet.title] = f"{count} inserted, {updated} updated"
 
-            return Response({'message': 'Volinteers data imported successfully!', 'details': inserted}, status=status.HTTP_201_CREATED)
+            return Response({'message': 'Volunteer data imported successfully!', 'details': inserted}, status=status.HTTP_201_CREATED)
 
         except Exception as e:
             import traceback
             traceback.print_exc()
             raise e
+
 
 
 
@@ -349,6 +502,7 @@ class EventsAPIView(APIView):
                     }
 
                 unit_data = {
+                    "id": entry.unit.id,
                     "unit_id": entry.unit.unit_id,
                     "unit_name": entry.unit.unit_name,
                     "email": entry.unit.email,
@@ -526,7 +680,8 @@ class EventsAPIView(APIView):
 
                 unit = entry.unit
                 location_map[loc_id]["units"].append({
-                    "unit_id": unit.id,
+                    "id": unit.id,
+                    "unit_id": unit.unit_id,
                     "unit_name": unit.unit_name,
                     "email": unit.email,
                     "phone": unit.phone,
@@ -733,33 +888,32 @@ class AttendanceAPIView(APIView):
     
     def post(self, request):
         is_many = isinstance(request.data, list)
-        data = request.data if is_many else [request.data]  # Always work with a list for easy looping
+        data = request.data if is_many else [request.data]  # Ensure a list for iteration
 
+        # Validate duplicates before saving
         for item in data:
             event_id = item.get('event')
             unit_id = item.get('unit')
-            # volunteer_id = item.get('volunteer')
-            # date = item.get('date')  
+            date = item.get('date')  # Make sure 'date' is passed in correct format (YYYY-MM-DD)
 
-            if Attendance.objects.filter(event_id=event_id, unit_id=unit_id).exists():
+            if Attendance.objects.filter(event_id=event_id, unit_id=unit_id, date=date).exists():
                 return Response({
-                    "message": f"Attendance already submitted for this event and unit."
+                    "message": f"Attendance already submitted for event ID {event_id}, unit ID {unit_id} on {date}."
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Proceed with saving if no duplicates found
+        # Proceed to save since no duplicates found
         serializer = AttendanceSerializer(data=request.data, many=is_many)
         if serializer.is_valid():
             serializer.save()
             return Response({
-                "message": "Attendance recorded",
+                "message": "Attendance recorded successfully.",
                 "data": serializer.data
             }, status=status.HTTP_201_CREATED)
 
         return Response({
-            "message": "Failed to record attendance",
+            "message": "Failed to record attendance.",
             "errors": serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
-
     
     def put(self, request):
         is_many = isinstance(request.data, list)
@@ -822,11 +976,12 @@ class AttendanceAPIView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+
 class AttendanceFileAPIView(APIView):
     def get(self, request):
         event_id = request.query_params.get('event')
         unit_id = request.query_params.get('unit')
-
+        
         files = AttendanceFile.objects.all()
 
         if event_id:
@@ -836,6 +991,7 @@ class AttendanceFileAPIView(APIView):
 
         serializer = AttendanceFileSerializer(files, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
 
     def post(self, request):
         # print('hello')
@@ -844,6 +1000,8 @@ class AttendanceFileAPIView(APIView):
             serializer.save()
             return Response({"message": "File uploaded successfully", "data": serializer.data}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+ 
+ 
     
 class TotalCountAPIView(APIView):
     def get(self, request):
@@ -876,18 +1034,106 @@ class TotalCountAPIView(APIView):
     
     
 class DataFechEvenUnitIdAPIView(APIView):
-    def post (self, request, unit=None, event=None):
+    # def post (self, request, unit=None, event=None):
+    #     unit = request.data.get('unit')
+    #     event = request.data.get('event')
+        
+    #     if unit and event:
+    #         # Get attendance for specific unit and event
+    #         attendance = Attendance.objects.filter(unit_id=unit, event_id=event)
+    #         serializer = AttendanceSerializer(attendance, many=True)
+    #         return Response(serializer.data, status=status.HTTP_200_OK)
+    #     else:
+    #         return Response({"error": "unit_id and event_id are required."}, status=status.HTTP_400_BAD_REQUEST) 
+        
+    # def put(self, request):
+    #     data = request.data
+    #     if not isinstance(data, list) or not data:
+    #         return Response({
+    #             "message": "Expected a non-empty list of attendance records."
+    #         }, status=status.HTTP_400_BAD_REQUEST)
+
+    #     # Extract event and unit from first item
+    #     event_id = data[0].get('event')
+    #     unit_id = data[0].get('unit')
+
+    #     if not event_id or not unit_id:
+    #         return Response({
+    #             "message": "Missing 'event' or 'unit' in the data."
+    #         }, status=status.HTTP_400_BAD_REQUEST)
+
+    #     # Delete existing records for this event and unit
+    #     Attendance.objects.filter(event_id=event_id, unit_id=unit_id).delete()
+
+    #     created_items = []
+    #     errors = []
+
+    #     for index, item in enumerate(data):
+    #         serializer = AttendanceSerializer(data=item)
+    #         if serializer.is_valid():
+    #             serializer.save()
+    #             created_items.append(serializer.data)
+    #         else:
+    #             errors.append({
+    #                 "index": index,
+    #                 "errors": serializer.errors,
+    #                 "data": item
+    #             })
+
+    #     if errors and created_items:
+    #         return Response({
+    #             "message": "Partial success: some records created, others failed.",
+    #             "created": created_items,
+    #             "errors": errors
+    #         }, status=status.HTTP_207_MULTI_STATUS)
+
+    #     elif errors:
+    #         return Response({
+    #             "message": "Failed to create any records.",
+    #             "errors": errors
+    #         }, status=status.HTTP_400_BAD_REQUEST)
+
+    #     return Response({
+    #         "message": "All attendance records updated successfully.",
+    #         "data": created_items
+    #     }, status=status.HTTP_200_OK)
+
+
+    def post(self, request):
         unit = request.data.get('unit')
         event = request.data.get('event')
-        
-        if unit and event:
-            # Get attendance for specific unit and event
-            attendance = Attendance.objects.filter(unit_id=unit, event_id=event)
-            serializer = AttendanceSerializer(attendance, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        else:
-            return Response({"error": "unit_id and event_id are required."}, status=status.HTTP_400_BAD_REQUEST) 
-        
+        date = request.data.get('date')  # Expecting a list of date strings
+
+        if not unit or not event or not date:
+            return Response({
+                "error": "unit, event, and date (list) are required."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not isinstance(date, list):
+            return Response({
+                "error": "date must be a list of 'YYYY-MM-DD' strings."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Parse date strings to date objects
+            date_objs = [datetime.strptime(d, '%Y-%m-%d').date() for d in date]
+        except ValueError:
+            return Response({
+                "error": "One or more dates are in invalid format. Use 'YYYY-MM-DD'."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Fetch only updated attendance records for given event, unit, and dates
+        attendance = Attendance.objects.filter(
+            unit_id=unit,
+            event_id=event,
+            date__in=date_objs,
+            already_updated=True
+        ).order_by('date', 'volunteer_id')  # Optional sorting
+
+        serializer = AttendanceSerializer(attendance, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    
     def put(self, request):
         data = request.data
         if not isinstance(data, list) or not data:
@@ -904,8 +1150,9 @@ class DataFechEvenUnitIdAPIView(APIView):
                 "message": "Missing 'event' or 'unit' in the data."
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Delete existing records for this event and unit
-        Attendance.objects.filter(event_id=event_id, unit_id=unit_id).delete()
+        # Optional: Clear existing attendance for those dates and volunteers
+        date = [item.get("date") for item in data if item.get("date")]
+        Attendance.objects.filter(event_id=event_id, unit_id=unit_id, date__in=date).delete()
 
         created_items = []
         errors = []
@@ -936,9 +1183,155 @@ class DataFechEvenUnitIdAPIView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({
-            "message": "All attendance records updated successfully.",
+            "message": "All attendance records saved successfully.",
             "data": created_items
-        }, status=status.HTTP_200_OK)
+        }, status=status.HTTP_200_OK) 
+    
+    
+    # def post(self, request, unit=None, event=None):
+    #     unit = request.data.get('unit')
+    #     event = request.data.get('event')
+    #     start_date = request.data.get('start_date')
+    #     end_date = request.data.get('end_date')
+
+    #     # ✅ CASE 1: Date Range Filtering
+    #     if unit and start_date and end_date:
+    #         try:
+    #             start = parse_date(start_date)
+    #             end = parse_date(end_date)
+
+    #             if not start or not end:
+    #                 return Response({"error": "Invalid date format. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+
+    #             # ✅ Get all events for this unit that overlap the date range
+    #             event_ids = Events.objects.filter(
+    #                 Q(start_date__lte=end),
+    #                 Q(end_date__gte=start),
+    #                 units__id=unit
+    #             ).values_list('id', flat=True)
+
+    #             if not event_ids:
+    #                 return Response({
+    #                     "message": "No events found for this unit in the given date range."
+    #                 }, status=status.HTTP_404_NOT_FOUND)
+
+    #             # ✅ Get attendance for all matching events
+    #             attendance = Attendance.objects.filter(
+    #                 unit_id=unit,
+    #                 event_id__in=event_ids
+    #             )
+
+    #             serializer = AttendanceSerializer(attendance, many=True)
+
+    #             return Response({
+    #                 "unit_id": unit,
+    #                 "start_date": start_date,
+    #                 "end_date": end_date,
+    #                 "total_events": len(event_ids),
+    #                 "attendance_records": serializer.data
+    #             }, status=status.HTTP_200_OK)
+
+    #         except Exception as e:
+    #             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    #     # ✅ CASE 2: Specific Unit + Event
+    #     elif unit and event:
+    #         attendance = Attendance.objects.filter(unit_id=unit, event_id=event)
+    #         serializer = AttendanceSerializer(attendance, many=True)
+    #         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    #     return Response(
+    #         {"error": "Please provide 'unit' and either 'event' or 'start_date' + 'end_date'."},
+    #         status=status.HTTP_400_BAD_REQUEST
+    #     )
+        
+    # def put(self, request):
+    #     data = request.data
+    #     if not isinstance(data, list) or not data:
+    #         return Response({
+    #             "message": "Expected a non-empty list of attendance records."
+    #         }, status=status.HTTP_400_BAD_REQUEST)
+
+    #     # 🔹 Optional: support date range filter for events
+    #     start_date = request.query_params.get('start_date')
+    #     end_date = request.query_params.get('end_date')
+
+    #     try:
+    #         if start_date and end_date:
+    #             start = parse_date(start_date)
+    #             end = parse_date(end_date)
+    #             if not start or not end:
+    #                 raise ValueError("Invalid date format.")
+
+    #     except Exception as e:
+    #         return Response({"error": f"Invalid date range: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+    #     created_items = []
+    #     errors = []
+
+    #     for index, item in enumerate(data):
+    #         event_id = item.get('event')
+    #         unit_id = item.get('unit')
+
+    #         if not event_id or not unit_id:
+    #             errors.append({
+    #                 "index": index,
+    #                 "error": "Missing 'event' or 'unit' in the record.",
+    #                 "data": item
+    #             })
+    #             continue
+
+    #         # ✅ Optional: if date range provided, check if event is within it
+    #         if start_date and end_date:
+    #             try:
+    #                 event = Events.objects.get(id=event_id)
+    #                 if event.start_date > end or (event.end_date and event.end_date < start):
+    #                     errors.append({
+    #                         "index": index,
+    #                         "error": f"Event {event_id} not in date range.",
+    #                         "data": item
+    #                     })
+    #                     continue
+    #             except Events.DoesNotExist:
+    #                 errors.append({
+    #                     "index": index,
+    #                     "error": f"Event {event_id} does not exist.",
+    #                     "data": item
+    #                 })
+    #                 continue
+
+    #         # 🔹 Delete previous attendance for this event and unit (only once)
+    #         if not any(att.event_id == event_id and att.unit_id == unit_id for att in created_items):
+    #             Attendance.objects.filter(event_id=event_id, unit_id=unit_id).delete()
+
+    #         serializer = AttendanceSerializer(data=item)
+    #         if serializer.is_valid():
+    #             instance = serializer.save()
+    #             created_items.append(instance)
+    #         else:
+    #             errors.append({
+    #                 "index": index,
+    #                 "errors": serializer.errors,
+    #                 "data": item
+    #             })
+
+    #     if errors and created_items:
+    #         return Response({
+    #             "message": "Partial success: some records created, others failed.",
+    #             "created": [AttendanceSerializer(obj).data for obj in created_items],
+    #             "errors": errors
+    #         }, status=status.HTTP_207_MULTI_STATUS)
+
+    #     elif errors:
+    #         return Response({
+    #             "message": "Failed to create any records.",
+    #             "errors": errors
+    #         }, status=status.HTTP_400_BAD_REQUEST)
+
+    #     return Response({
+    #         "message": "All attendance records saved successfully.",
+    #         "created": [AttendanceSerializer(obj).data for obj in created_items]
+    #     }, status=status.HTTP_200_OK)
         
         
 class EventUnitLocationAPIView(APIView):
@@ -1001,20 +1394,61 @@ class AttendanceFileDownloadAPIView(APIView):
         
             
 class VolunteersByUnitPostAPIView(APIView):
+    # def post(self, request):
+    #     unit_id = request.data.get("unit")
+
+    #     if not unit_id:
+    #         return Response({"error": "Unit ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    #     # Use `unit_id=unit_id` to filter by ForeignKey properly
+    #     volunteers = Volunteer.objects.filter(unit_id=unit_id)
+
+    #     if not volunteers.exists():
+    #         return Response({"message": "No volunteers found for this unit."}, status=status.HTTP_404_NOT_FOUND)
+
+    #     serializer = VolunteerSerializer(volunteers, many=True)
+    #     return Response(serializer.data, status=status.HTTP_200_OK)
+    
     def post(self, request):
         unit_id = request.data.get("unit")
 
         if not unit_id:
             return Response({"error": "Unit ID is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Use `unit_id=unit_id` to filter by ForeignKey properly
         volunteers = Volunteer.objects.filter(unit_id=unit_id)
 
         if not volunteers.exists():
             return Response({"message": "No volunteers found for this unit."}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = VolunteerSerializer(volunteers, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        result = []
+
+        for volunteer in volunteers:
+            # Fetch all attendance records for this volunteer under the same unit
+            attendance_records = Attendance.objects.filter(volunteer=volunteer, unit_id=unit_id).order_by('-date')
+
+            attendance_data = [
+                {
+                    "event_id": att.id,
+                    "date": att.date,
+                    "present": att.present,
+                    "absent": att.absent,
+                    "in_time": att.in_time,
+                    "out_time": att.out_time,
+                    "remark": att.remark
+                }
+                for att in attendance_records
+            ]
+
+            result.append({
+                "id": volunteer.id,
+                "name": volunteer.name,
+                "new_personal_number": volunteer.new_personal_number,
+                "gender": volunteer.gender,  
+                # "mobile": volunteer.mobile,
+                "attendance": attendance_data
+            })
+
+        return Response(result, status=status.HTTP_200_OK)
     
 
 # class UploadVolunteerImageStatsView(APIView):
@@ -1123,7 +1557,7 @@ class UploadFileExtractTextAPIView(APIView):
             return Response({"error": str(e)}, status=500)
         
         
-class VolunteersReportAPIView(APIView):
+class   VolunteersReportAPIView(APIView):
     def get(self, request):
         try:
             data = []
@@ -1136,8 +1570,12 @@ class VolunteersReportAPIView(APIView):
                 total_male = volunteers.filter(gender='Male').count()
                 total_female = volunteers.filter(gender='Female').count()
                 # total_registered = volunteers.filter(is_registered=True).count()
+                active_gents = volunteers.filter(is_active=True, gender='Male').count()
+                active_ladies = volunteers.filter(is_active=True, gender='Female').count()
                 total_registered = total_male + total_female
                 
+                active_total = active_gents + active_ladies
+
                 total_unregistered = volunteers.filter(is_registered=False).count()
                 unregistered_male = volunteers.filter(is_registered=False, gender='Male').count()
                 unregistered_female = volunteers.filter(is_registered=False, gender='Female').count()
@@ -1146,26 +1584,42 @@ class VolunteersReportAPIView(APIView):
                 grand_total = total_registered + total_unregistered
 
                 # Counts for active volunteers only
-                total_active = volunteers.filter(is_active=True).count()
-                print((total_active))
+                # total_active = volunteers.filter(is_active=True).count()
+                # print((total_active))
                 # Print names of all active volunteers for testing
-                active_volunteers = volunteers.filter(is_active=True)
+                # active_volunteers = volunteers.filter(is_active=True)
                 # print("Active volunteer names:", [v.name for v in active_volunteers])
 
+                # data.append({
+                #     "id": unit.id,
+                #     "khetra": unit.khetra.khetra if unit.khetra else None,
+                #     "unit_id": unit.unit_id,
+                #     "unit_name": unit.unit_name,
+
+                #     "total_male": total_male,
+                #     "total_female": total_female,
+                #     "total_registered": total_registered,
+                #     "total_unregistered": total_unregistered,
+                #     "unregistered_male": unregistered_male,
+                #     "unregistered_female": unregistered_female,
+
+                #     "total_active": total_active,
+                #     "grand_total": grand_total
+                # })
                 data.append({
                     "id": unit.id,
                     "khetra": unit.khetra.khetra if unit.khetra else None,
                     "unit_id": unit.unit_id,
                     "unit_name": unit.unit_name,
 
-                    "total_male": total_male,
-                    "total_female": total_female,
-                    "total_registered": total_registered,
-                    "total_unregistered": total_unregistered,
-                    "unregistered_male": unregistered_male,
-                    "unregistered_female": unregistered_female,
+                    "reg_gents": total_male,
+                    "reg_ladies": total_female,
+                    "active_gents": active_gents,
+                    "active_ladies": active_ladies,
+                    "active_total": active_total,
+                    "unreg_gents": unregistered_male,
+                    "unreg_ladies": unregistered_female,
 
-                    "total_active": total_active,
                     "grand_total": grand_total
                 })
 
@@ -1183,65 +1637,67 @@ class AttendanceReportAPIView(APIView):
         try:
             if event_id is None:
                 return Response({"message": "Event ID is required"}, status=400)
-             # Get the event
+
+            # Get event info
             event = get_object_or_404(Events, id=event_id)
             event_name = event.event_name
-            
 
-            # Get all present attendance records for the given event
-            attendance_qs = Attendance.objects.filter(event__id=event_id, present=True)
+            # Get all present records for the event
+            attendance_qs = Attendance.objects.filter(event_id=event_id, present=True)
 
-            # Get distinct unit IDs from attendance
-            unit_ids = attendance_qs.values_list('unit__id', flat=True).distinct()
+            # Get distinct dates from attendance
+            distinct_dates = attendance_qs.values_list('date', flat=True).distinct()
             response_data = []
 
-            for unit_id in unit_ids:
-                unit_attendance = attendance_qs.filter(unit__id=unit_id)
-
-                total_present = unit_attendance.count()
-                total_present_male = unit_attendance.filter(volunteer__gender__iexact="Male").count()
-                total_present_female = unit_attendance.filter(volunteer__gender__iexact="Female").count()
-
-                total_unregister_male = unit_attendance.filter(
-                    volunteer__gender__iexact="Male",
-                    volunteer__is_registered=False
-                ).count()
-
-                total_unregister_female = unit_attendance.filter(
-                    volunteer__gender__iexact="Female",
-                    volunteer__is_registered=False
-                ).count()
-
-                total_reg_male_present = total_present_male - total_unregister_male
-                total_reg_female_present = total_present_female - total_unregister_female
-
-                total_reg = total_reg_male_present + total_reg_female_present
-                total_unreg = total_unregister_male + total_unregister_female
-                grand_total = total_reg + total_unreg
+            for date in distinct_dates:
+                date_wise_units = attendance_qs.filter(date=date).values_list('unit_id', flat=True).distinct()
                 
-                # Fetch unit name
-                unit = get_object_or_404(Unit, id=unit_id)
-                unit_name = unit.unit_name
+                for unit_id in date_wise_units:
+                    unit_attendance = attendance_qs.filter(date=date, unit_id=unit_id)
 
-                response_data.append({
-                    "unit_id": unit_id,
-                    "unit_name": unit_name,
-                    "total_present": total_present,
-                    "total_present_male": total_present_male,
-                    "total_present_female": total_present_female,
-                    "total_unregister_male": total_unregister_male,
-                    "total_unregister_female": total_unregister_female,
-                    "total_register_male": total_reg_male_present,
-                    "total_register_female": total_reg_female_present,
-                    "total_register": total_reg,
-                    "total_unregister": total_unreg,
-                    "grand_total": grand_total
-                })
+                    total_present = unit_attendance.count()
+                    total_present_male = unit_attendance.filter(volunteer__gender__iexact="Male").count()
+                    total_present_female = unit_attendance.filter(volunteer__gender__iexact="Female").count()
+
+                    total_unregister_male = unit_attendance.filter(
+                        volunteer__gender__iexact="Male",
+                        volunteer__is_registered=False
+                    ).count()
+
+                    total_unregister_female = unit_attendance.filter(
+                        volunteer__gender__iexact="Female",
+                        volunteer__is_registered=False
+                    ).count()
+
+                    total_reg_male_present = total_present_male - total_unregister_male
+                    total_reg_female_present = total_present_female - total_unregister_female
+
+                    total_reg = total_reg_male_present + total_reg_female_present
+                    total_unreg = total_unregister_male + total_unregister_female
+                    grand_total = total_reg + total_unreg
+
+                    unit_name = Unit.objects.get(id=unit_id).unit_name
+
+                    response_data.append({
+                        "date": str(date),
+                        "unit_id": unit_id,
+                        "unit_name": unit_name,
+                        "total_present": total_present,
+                        "total_present_male": total_present_male,
+                        "total_present_female": total_present_female,
+                        "total_unregister_male": total_unregister_male,
+                        "total_unregister_female": total_unregister_female,
+                        "total_register_male": total_reg_male_present,
+                        "total_register_female": total_reg_female_present,
+                        "total_register": total_reg,
+                        "total_unregister": total_unreg,
+                        "grand_total": grand_total
+                    })
 
             return Response({
                 "event_id": event_id,
                 "event_name": event_name,
-                "unit_summary": response_data
+                "datewise_unit_summary": response_data
             }, status=200)
 
         except Exception as e:
@@ -1293,3 +1749,67 @@ class OverallVolunteersStatsAPIView(APIView):
 
         except Exception as e:
             return Response({"status": False, "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        
+class VolunteersPendingAttendanceAPIView(APIView):
+     def post(self, request):
+        unit_id = request.data.get("unit")
+        event_id = request.data.get("event")
+        date = request.data.get("date")
+
+        if not (unit_id and event_id and date):
+            return Response({
+                "error": "unit, event, and date are required."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            attendance_date = datetime.strptime(date, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({
+                "error": "Invalid date format. Use YYYY-MM-DD."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get all attendance records for given event, unit, and date
+        attendance_qs = Attendance.objects.filter(
+            unit_id=unit_id,
+            event_id=event_id,
+            date=attendance_date
+        ).select_related('volunteer')
+
+        if not attendance_qs.exists():
+            return Response({
+                "message": "No volunteers have been marked for attendance yet."
+            }, status=status.HTTP_200_OK)
+
+        serializer = AttendanceSerializer(attendance_qs, many=True)
+        return Response({
+            "message": "Volunteers already marked for attendance.",
+            "data": serializer.data
+        }, status=status.HTTP_200_OK)
+        
+        
+class AttendanceFileUploadView(APIView):
+    parser_classes = (MultiPartParser, FormParser)
+
+    def post(self, request):
+        serializer = AttendanceFileUploadSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "message": "Attendance file uploaded successfully",
+                "data": serializer.data
+            }, status=201)
+        return Response(serializer.errors, status=400)
+
+    def get(self, request):
+        event_id = request.query_params.get('event')
+        unit_id = request.query_params.get('unit')
+        
+        queryset = AttendanceFile.objects.all()
+        if event_id:
+            queryset = queryset.filter(event_id=event_id)
+        if unit_id:
+            queryset = queryset.filter(unit_id=unit_id)
+
+        serializer = AttendanceFileUploadSerializer(queryset, many=True, context={'request': request})
+        return Response(serializer.data)

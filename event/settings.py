@@ -183,7 +183,7 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=24),  # <== 24-hour token validity
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=6),  # <== 24-hour token validity
     # "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
     'AUTH_HEADER_TYPES': ('Bearer',),
 }

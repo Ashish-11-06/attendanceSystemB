@@ -195,6 +195,43 @@ class AttendanceFileSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['file_id'] 
         
+    
+
+class AttendanceFileUploadSerializer(serializers.ModelSerializer):
+    action = serializers.SerializerMethodField()
+    event = serializers.SerializerMethodField()
+    unit = serializers.SerializerMethodField()
+    class Meta:
+        model = AttendanceFile
+        fields = ['file_id', 'file_name', 'file', 'event', 'unit', 'uploaded_at', 'action', 'date']
+        read_only_fields = ['file_id']
+        
+    def get_event(self, obj):
+        if obj.event:
+            return {
+                "event_id": obj.event.id,
+                "event_name": obj.event.event_name
+            }
+        return None
+
+
+    def get_unit(self, obj):
+        if obj.unit:
+            return {
+                "unit_id": obj.unit.id,
+                "unit_name": obj.unit.unit_name
+            }
+        return None
+
+
+    def get_action(self, obj):
+        request = self.context.get('request')
+        if request is not None:
+            file_url = request.build_absolute_uri(obj.file.url)
+            return file_url
+        return None
+
+        
 class EventUnitLocationSerializer(serializers.ModelSerializer):
     event = serializers.PrimaryKeyRelatedField(queryset=Events.objects.all())
     unit = serializers.PrimaryKeyRelatedField(queryset=Unit.objects.all())
