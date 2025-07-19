@@ -1402,7 +1402,7 @@ class VolunteersByUnitPostAPIView(APIView):
         if not unit_id:
             return Response({"error": "Unit ID is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        volunteers = Volunteer.objects.filter(unit_id=unit_id)
+        volunteers = Volunteer.objects.filter(unit_id=unit_id, is_active=True).order_by('name')
 
         if not volunteers.exists():
             return Response({"message": "No volunteers found for this unit."}, status=status.HTTP_404_NOT_FOUND)
