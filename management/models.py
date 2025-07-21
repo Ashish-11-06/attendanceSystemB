@@ -28,7 +28,7 @@ class Events(models.Model):
     event_id = models.CharField(max_length=50)
     event_name = models.CharField(max_length=250)
     # location = models.ManyToManyField('management.Location', blank=True, related_name='events')
-    units = models.ManyToManyField('Unit', through='EventUnitLocation',  blank=True)
+    units = models.ManyToManyField('Unit', through='EventUnitLocation', blank=True)
     locations = models.ManyToManyField('Location', through='EventUnitLocation', blank=True)
 
     start_date = models.DateField()

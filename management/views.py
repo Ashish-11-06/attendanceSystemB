@@ -464,7 +464,7 @@ class UploadVolunteerExcelView(APIView):
 
 class EventsAPIView(APIView):
     permission_classes = [IsAuthenticated]
-
+    
     def get(self, request, event_id=None):
         if event_id:
             events = Events.objects.filter(event_id=event_id)
@@ -474,8 +474,9 @@ class EventsAPIView(APIView):
         result = []
 
         for event in events:
+            
             event_data = {
-                "id":event.id,
+                "id": event.id,
                 "event_id": event.event_id,
                 "event_name": event.event_name,
                 "start_date": event.start_date,
@@ -484,33 +485,40 @@ class EventsAPIView(APIView):
                 "locations": []
             }
 
+            
+            print("event data", event_data)
             event_locations = EventUnitLocation.objects.filter(event=event)
-
+            location_ids = set(event_locations.values_list("location_id", flat=True))
             location_map = {}
 
-            for entry in event_locations:
-                if not entry.unit or not entry.location:
-                    continue
-
-                loc_id = entry.location.id
-                if loc_id not in location_map:
-                    location_map[loc_id] = {
-                        "location_id": entry.location.id,
-                        "location_city": entry.location.city,  # Assuming `name` field in Location
-                        "location_address": entry.location.address,  # Assuming `address` field in Location
+            print("event locaions",event_locations)
+            for location_id in location_ids:
+            
+                try:
+                    location = Location.objects.get(id=location_id)
+                    location_map[location_id] = {
+                        "location_id": location.id,
+                        "location_city": location.city,
+                        "location_address": location.address,  
                         "units": []
                     }
+                    print("location_map",location_map)
+                except Location.DoesNotExist:
+                    print(False)
+                    continue
 
-                unit_data = {
-                    "id": entry.unit.id,
-                    "unit_id": entry.unit.unit_id,
-                    "unit_name": entry.unit.unit_name,
-                    "email": entry.unit.email,
-                    "phone": entry.unit.phone,
-                    "location": entry.unit.location
-                }
-
-                location_map[loc_id]["units"].append(unit_data)
+            for entry in event_locations:
+                if entry.unit and entry.location_id in location_map:
+                    unit = entry.unit
+                    unit_data = {
+                        "id": unit.id,
+                        "unit_id": unit.unit_id,
+                        "unit_name": unit.unit_name,
+                        "email": unit.email,
+                        "phone": unit.phone,
+                        "location": unit.location
+                    }
+                    location_map[entry.location_id]["units"].append(unit_data)
 
             event_data["locations"] = list(location_map.values())
             result.append(event_data)
@@ -518,141 +526,171 @@ class EventsAPIView(APIView):
         return Response(result, status=200)
 
 
+
     def post(self, request):
-        data = request.data.copy()
+            data = request.data.copy()
 
-        # Generate unique event_id
-        event_id = str(uuid.uuid4())[:8]
-        data['event_id'] = event_id
+            # Generate unique event_id
+            event_id = str(uuid.uuid4())[:8]
+            data['event_id'] = event_id
 
-        # Extract locations with units
-        locations_data = data.pop("locations", [])
+            # Extract locations with units
+            locations_data = data.pop("locations", [])
 
-        # Serialize and save event
-        serializer = EventsSerializer(data=data)
-        if serializer.is_valid():
-            event = serializer.save()
+            # Serialize and save event
+            serializer = EventsSerializer(data=data)
+            if serializer.is_valid():
+                event = serializer.save()
 
-            # Save EventUnitLocation entries
-            for loc in locations_data:
-                location = None
-                unit_ids = loc.get("unit", [])
+                # Save EventUnitLocation entries
+                for loc in locations_data:
+                    location = None
+                    unit_ids = loc.get("unit", [])
 
-                # Case 1: Existing location by ID
-                if "location_id" in loc:
-                    try:
-                        location = Location.objects.get(id=loc["location_id"])
-                    except Location.DoesNotExist:
-                        return Response({"error": f"Location ID {loc['location_id']} not found."}, status=400)
+                    # Case 1: Existing location by ID
+                    if "location_id" in loc:
+                        try:
+                            location = Location.objects.get(id=loc["location_id"])
+                        except Location.DoesNotExist:
+                            return Response({"error": f"Location ID {loc['location_id']} not found."}, status=400)
 
-                # Case 2: New location to be created
-                elif "location" in loc:
-                    location_data = loc["location"]
-                    # Generate unique location_id for the Location model's field
-                    unique_location_id = str(uuid.uuid4())[:8]
-                    location = Location.objects.create(
-                        location_id=unique_location_id,
-                        state=location_data.get("state", ""),
-                        city=location_data.get("city", ""),
-                        address=location_data.get("address", "")
-                    )
+                    # Case 2: New location to be created
+                    elif "location" in loc:
+                        location_data = loc["location"]
+                        unique_location_id = str(uuid.uuid4())[:8]
+                        location = Location.objects.create(
+                            location_id=unique_location_id,
+                            state=location_data.get("state", ""),
+                            city=location_data.get("city", ""),
+                            address=location_data.get("address", "")
+                        )
+                    else:
+                        return Response({"error": "Each location must include either 'location_id' or 'location'."}, status=400)
 
-                else:
-                    return Response({"error": "Each location must include either 'location_id' or 'location'."}, status=400)
-
-                # Link units to the selected/created location
-                for unit_id in unit_ids:
-                    try:
-                        unit = Unit.objects.get(id=unit_id)
+                    # Link units or save location only (unit_ids may be empty)
+                    if unit_ids:
+                        for unit_id in unit_ids:
+                            try:
+                                unit = Unit.objects.get(id=unit_id)
+                                EventUnitLocation.objects.create(
+                                    event=event,
+                                    location=location,
+                                    unit=unit
+                                )
+                            except Unit.DoesNotExist:
+                                return Response({"error": f"Unit ID {unit_id} not found."}, status=400)
+                    else:
+                        # Save location with no units
                         EventUnitLocation.objects.create(
                             event=event,
                             location=location,
-                            unit=unit
+                            unit=None  # Unit is optional
                         )
-                    except Unit.DoesNotExist:
-                        return Response({"error": f"Unit ID {unit_id} not found."}, status=400)
 
-            # Prepare full response
-            response_data = {
-                "id": event.id,
-                "event_id": event.event_id,
-                "event_name": event.event_name,
-                "start_date": event.start_date,
-                "end_date": event.end_date,
-                "time": event.time,
-                "locations": []
-            }
+                # Prepare response
+                response_data = {
+                    "id": event.id,
+                    "event_id": event.event_id,
+                    "event_name": event.event_name,
+                    "start_date": event.start_date,
+                    "end_date": event.end_date,
+                    "time": event.time,
+                    "locations": []
+                }
 
-            # Fetch full details from EventUnitLocation
-            event_locations = EventUnitLocation.objects.filter(event=event)
-            location_map = {}
+                # Group locations with units
+                event_locations = EventUnitLocation.objects.filter(event=event)
+                location_map = {}
 
-            for entry in event_locations:
-                if not entry.unit or not entry.location:
-                    continue
+                for entry in event_locations:
+                    if not entry.location:
+                        continue
 
-                loc_id = entry.location.id
-                if loc_id not in location_map:
-                    location_map[loc_id] = {
-                        "location_id": loc_id,
-                        "location_name": entry.location.city,  # assuming field name
-                        "units": []
-                    }
+                    loc_id = entry.location.id
+                    if loc_id not in location_map:
+                        location_map[loc_id] = {
+                            "location_id": loc_id,
+                            "location_city": entry.location.city,
+                            "location_address": entry.location.address,
+                            "units": []
+                        }
 
-                unit = entry.unit
-                location_map[loc_id]["units"].append({
-                    "unit_id": unit.id,
-                    "unit_name": unit.unit_name,
-                    "email": unit.email,
-                    "phone": unit.phone,
-                    "location": unit.location
-                })
+                    if entry.unit:
+                        location_map[loc_id]["units"].append({
+                            "unit_id": entry.unit.id,
+                            "unit_name": entry.unit.unit_name,
+                            "email": entry.unit.email,
+                            "phone": entry.unit.phone,
+                            "location": entry.unit.location
+                        })
 
-            response_data["locations"] = list(location_map.values())
+                response_data["locations"] = list(location_map.values())
 
-            return Response({
-                "message": "Event created successfully!",
-                "data": response_data
-            }, status=201)
+                return Response({
+                    "message": "Event created successfully!",
+                    "data": response_data
+                }, status=201)
 
-        return Response(serializer.errors, status=400)
-    
+            return Response(serializer.errors, status=400)
+        
     def put(self, request, event_id=None):
         if not event_id:
             return Response({"error": "event_id is required in URL."}, status=status.HTTP_400_BAD_REQUEST)
 
         event = get_object_or_404(Events, event_id=event_id)
         data = request.data.copy()
-
-        # Remove locations from main data and handle separately
         locations_data = data.pop("locations", [])
 
         serializer = EventsSerializer(event, data=data)
         if serializer.is_valid():
             event = serializer.save()
 
-            # ✅ Clear old location-unit mappings
+            # Clear existing mappings
             EventUnitLocation.objects.filter(event=event).delete()
 
-            # ✅ Re-add updated mappings
+            location_map = {}
+
             for loc in locations_data:
                 location_id = loc.get("location_id")
-                unit_ids = loc.get("unit", [])
+                unit_ids = loc.get("units") or loc.get("unit") or []
+
                 try:
                     location = Location.objects.get(id=location_id)
-                    for unit_id in unit_ids:
-                        unit = Unit.objects.get(id=unit_id)
-                        EventUnitLocation.objects.create(
-                            event=event,
-                            location=location,
-                            unit=unit
-                        )
+
+                    # Initialize location in map
+                    location_map[location_id] = {
+                        "location_id": location.id,
+                        "location_city": location.city,
+                        "location_address": location.address,
+                        "units": []
+                    }
+
+                    if unit_ids:
+                        for unit_id in unit_ids:
+                            try:
+                                unit = Unit.objects.get(id=unit_id)
+                                EventUnitLocation.objects.create(event=event, location=location, unit=unit)
+
+                                location_map[location_id]["units"].append({
+                                    "id": unit.id,
+                                    "unit_id": unit.unit_id,
+                                    "unit_name": unit.unit_name,
+                                    "email": unit.email,
+                                    "phone": unit.phone,
+                                    "location": unit.location
+                                })
+
+                            except Unit.DoesNotExist:
+                                return Response({"error": f"Unit ID {unit_id} not found."}, status=400)
+                    else:
+                        # ✅ Save location mapping even if no unit
+                        EventUnitLocation.objects.create(event=event, location=location, unit=None)
+
                 except Location.DoesNotExist:
                     return Response({"error": f"Location ID {location_id} not found."}, status=400)
-                except Unit.DoesNotExist:
-                    return Response({"error": f"Unit ID {unit_id} not found."}, status=400)
+                except Exception as e:
+                    return Response({"error": f"Error while saving location/unit: {str(e)}"}, status=500)
 
-            # ✅ Prepare response in the same format
             response_data = {
                 "id": event.id,
                 "event_id": event.event_id,
@@ -660,35 +698,8 @@ class EventsAPIView(APIView):
                 "start_date": event.start_date,
                 "end_date": event.end_date,
                 "time": event.time,
-                "locations": []
+                "locations": list(location_map.values())
             }
-
-            event_locations = EventUnitLocation.objects.filter(event=event)
-            location_map = {}
-
-            for entry in event_locations:
-                if not entry.unit or not entry.location:
-                    continue
-
-                loc_id = entry.location.id
-                if loc_id not in location_map:
-                    location_map[loc_id] = {
-                        "location_id": loc_id,
-                        "location_name": entry.location.city,  # assuming 'city' is the name
-                        "units": []
-                    }
-
-                unit = entry.unit
-                location_map[loc_id]["units"].append({
-                    "id": unit.id,
-                    "unit_id": unit.unit_id,
-                    "unit_name": unit.unit_name,
-                    "email": unit.email,
-                    "phone": unit.phone,
-                    "location": unit.location
-                })
-
-            response_data["locations"] = list(location_map.values())
 
             return Response({
                 "message": "Event updated successfully!",
@@ -696,6 +707,7 @@ class EventsAPIView(APIView):
             }, status=200)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
     def delete(self, request, event_id=None):
         if not event_id:
@@ -786,6 +798,8 @@ class UnitAPIView(APIView):
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    
 
     def delete(self, request, unit_id=None):
         if not unit_id:
