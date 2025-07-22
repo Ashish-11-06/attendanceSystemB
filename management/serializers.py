@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Admin, Attendance, AttendanceFile, EventUnitLocation, Events, Khetra, Location, Register, Unit, Volunteer
 from django.utils import timezone
+from django.conf import settings
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -227,7 +228,18 @@ class AttendanceFileUploadSerializer(serializers.ModelSerializer):
     def get_action(self, obj):
         request = self.context.get('request')
         if request is not None:
-            file_url = request.build_absolute_uri(obj.file.url)
+            # Build original absolute file URL
+            original_url = request.build_absolute_uri(obj.file.url)
+
+            # Get base host URL (scheme + domain + port)
+            base_url = request.build_absolute_uri('/').rstrip('/')
+            
+            # Add prefix from settings (ensure it starts with /)
+            prefix = settings.URL_PREFIX.rstrip('/')
+
+            # Rebuild URL with prefix, if needed
+            file_url = f"{base_url}{prefix}{obj.file.url}"
+
             return file_url
         return None
 

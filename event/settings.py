@@ -187,3 +187,5 @@ SIMPLE_JWT = {
     # "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
+
+URL_PREFIX = os.getenv('URL_PREFIX', '')

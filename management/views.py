@@ -1394,20 +1394,7 @@ class AttendanceFileDownloadAPIView(APIView):
         
             
 class VolunteersByUnitPostAPIView(APIView):
-    # def post(self, request):
-    #     unit_id = request.data.get("unit")
-
-    #     if not unit_id:
-    #         return Response({"error": "Unit ID is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-    #     # Use `unit_id=unit_id` to filter by ForeignKey properly
-    #     volunteers = Volunteer.objects.filter(unit_id=unit_id)
-
-    #     if not volunteers.exists():
-    #         return Response({"message": "No volunteers found for this unit."}, status=status.HTTP_404_NOT_FOUND)
-
-    #     serializer = VolunteerSerializer(volunteers, many=True)
-    #     return Response(serializer.data, status=status.HTTP_200_OK)
+   
     
     def post(self, request):
         unit_id = request.data.get("unit")
@@ -1415,7 +1402,7 @@ class VolunteersByUnitPostAPIView(APIView):
         if not unit_id:
             return Response({"error": "Unit ID is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        volunteers = Volunteer.objects.filter(unit_id=unit_id)
+        volunteers = Volunteer.objects.filter(unit_id=unit_id, is_active=True).order_by('name')
 
         if not volunteers.exists():
             return Response({"message": "No volunteers found for this unit."}, status=status.HTTP_404_NOT_FOUND)
@@ -1444,6 +1431,7 @@ class VolunteersByUnitPostAPIView(APIView):
                 "name": volunteer.name,
                 "new_personal_number": volunteer.new_personal_number,
                 "gender": volunteer.gender,  
+                'is_registered': volunteer.is_registered,
                 # "mobile": volunteer.mobile,
                 "attendance": attendance_data
             })

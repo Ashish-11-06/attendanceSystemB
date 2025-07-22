@@ -1,0 +1,30 @@
+name: Backend CI/CD - Deploy via SSH & PM2
+
+on:
+  push:
+    branches:
+      - main  # adjust if you deploy from a different branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Deploy over SSH and reload PM2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            echo "🔄 Pulling latest code..."
+            cd /home/ubuntu/atd/attendanceSystemB
+            git pull origin main
+
+            echo "♻️ Reloading PM2 process..."
+            pm2 reload attendance
+
+            echo "✅ Deployment complete."
