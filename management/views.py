@@ -1581,33 +1581,9 @@ class   VolunteersReportAPIView(APIView):
                 total_unregistered = volunteers.filter(is_registered=False).count()
                 unregistered_male = volunteers.filter(is_registered=False, gender='Male').count()
                 unregistered_female = volunteers.filter(is_registered=False, gender='Female').count()
-                # grand_total = volunteers.count()  
                 
                 grand_total = total_registered + total_unregistered
 
-                # Counts for active volunteers only
-                # total_active = volunteers.filter(is_active=True).count()
-                # print((total_active))
-                # Print names of all active volunteers for testing
-                # active_volunteers = volunteers.filter(is_active=True)
-                # print("Active volunteer names:", [v.name for v in active_volunteers])
-
-                # data.append({
-                #     "id": unit.id,
-                #     "khetra": unit.khetra.khetra if unit.khetra else None,
-                #     "unit_id": unit.unit_id,
-                #     "unit_name": unit.unit_name,
-
-                #     "total_male": total_male,
-                #     "total_female": total_female,
-                #     "total_registered": total_registered,
-                #     "total_unregistered": total_unregistered,
-                #     "unregistered_male": unregistered_male,
-                #     "unregistered_female": unregistered_female,
-
-                #     "total_active": total_active,
-                #     "grand_total": grand_total
-                # })
                 data.append({
                     "id": unit.id,
                     "khetra": unit.khetra.khetra if unit.khetra else None,
