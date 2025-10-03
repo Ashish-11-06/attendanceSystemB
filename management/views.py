@@ -129,6 +129,7 @@ class LoginAPIView(APIView):
                             "id": admin.id,
                             "admin_name": admin.name,
                             "email": admin.email,
+                            "user_type": "admin",
                             "access": str(access_token),
                         }
                     }, status=status.HTTP_200_OK)
@@ -162,6 +163,7 @@ class LoginAPIView(APIView):
                     "message": "Unit login successful",
                     "user": {
                         "id": unit.id,
+                        "unit_id": unit.unit_id,
                         "unit_name": unit.unit_name,
                         "email": unit.email,
                         "user_type": "unit",
