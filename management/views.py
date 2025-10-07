@@ -520,6 +520,7 @@ class EventsAPIView(APIView):
         return Response(result, status=200)
 
 
+   
     def post(self, request):
         data = request.data.copy()
 
@@ -705,7 +706,68 @@ class EventsAPIView(APIView):
         event = get_object_or_404(Events, event_id=event_id)
         event.delete()
         return Response({"message": "Event deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
-  
+    
+class EventByUnitsOnlyAPIView(APIView):
+    """
+    GET API to get all events where a specific unit participates.
+    - Pass unit_id in the URL: /api/events/by-unit/<unit_id>/
+    - Response keeps the same structure: events -> locations -> units
+    """
+
+    def get(self, request, unit_id):
+        try:
+            unit = Unit.objects.get(id=unit_id)
+        except Unit.DoesNotExist:
+            return Response({"error": "Unit not found."}, status=404)
+
+        # Get all EventUnitLocation entries for this unit
+        event_locations = EventUnitLocation.objects.filter(unit_id=unit_id).select_related('event', 'location', 'unit')
+
+        # Map events
+        events_map = {}
+
+        for entry in event_locations:
+            event = entry.event
+            location = entry.location
+
+            if event.id not in events_map:
+                events_map[event.id] = {
+                    "id": event.id,
+                    "event_id": event.event_id,
+                    "event_name": event.event_name,
+                    "start_date": event.start_date,
+                    "end_date": event.end_date,
+                    "time": event.time,
+                    "locations": {}
+                }
+
+            loc_map = events_map[event.id]["locations"]
+            if location.id not in loc_map:
+                loc_map[location.id] = {
+                    "location_id": location.id,
+                    "location_city": location.city,
+                    "location_address": location.address,
+                    "units": []
+                }
+
+            # Add the unit to the location
+            loc_map[location.id]["units"].append({
+                "id": unit.id,
+                "unit_id": unit.unit_id,
+                "unit_name": unit.unit_name,
+                "email": unit.email,
+                "phone": unit.phone,
+                "location": unit.location
+            })
+
+        # Convert locations dict to list for each event
+        result = []
+        for event_data in events_map.values():
+            event_data["locations"] = list(event_data["locations"].values())
+            result.append(event_data)
+
+        return Response(result, status=200)
+
     
     
 class LocationAPIView(APIView):
@@ -1004,20 +1066,71 @@ class AttendanceFileAPIView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
  
  
-    
 class TotalCountAPIView(APIView):
-    def get(self, request):
-        total_events = Events.objects.count()
-        total_volunteers = Volunteer.objects.filter( is_active=True).count()
-        total_units = Unit.objects.count()
-        total_locations = Location.objects.count()
+    """
+    GET API to return overall statistics:
+    - Volunteers stats (male, female, registered, unregistered)
+    - Total events, units, locations, active volunteers
+    """
 
-        return Response({
-            "total_events": total_events,
-            "total_volunteers": total_volunteers,
-            "total_units": total_units,
-            "total_locations": total_locations
-        }, status=status.HTTP_200_OK)
+    def get(self, request):
+        try:
+            # Volunteers
+            volunteers = Volunteer.objects.all()
+            total_male = volunteers.filter(gender='Male').count()
+            total_female = volunteers.filter(gender='Female').count()
+            total_registered = volunteers.filter(is_registered=True).count()
+            total_unregistered = volunteers.filter(is_registered=False).count()
+            unregistered_male = volunteers.filter(is_registered=False, gender='Male').count()
+            unregistered_female = volunteers.filter(is_registered=False, gender='Female').count()
+            total_active = volunteers.filter(is_active=True).count()
+            total_inactive = volunteers.filter(is_active=False).count()
+            grand_total = volunteers.count()
+
+            # Total counts
+            total_events = Events.objects.count()
+            total_units = Unit.objects.count()
+            total_locations = Location.objects.count()
+
+            # Combine all stats
+            data = {
+                "volunteers_stats": {
+                    "total_male": total_male,
+                    "total_female": total_female,
+                    "total_registered": total_registered,
+                    "total_unregistered": total_unregistered,
+                    "unregistered_male": unregistered_male,
+                    "unregistered_female": unregistered_female,
+                    "total_active": total_active,
+                    "total_inactive": total_inactive,
+                    "grand_total": grand_total
+                },
+                "total_counts": {
+                    "total_events": total_events,
+                    "total_units": total_units,
+                    "total_locations": total_locations
+                }
+            }
+
+            return Response(data, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"status": False, "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+ 
+    
+# class TotalCountAPIView(APIView):
+#     def get(self, request):
+#         total_events = Events.objects.count()
+#         total_volunteers = Volunteer.objects.filter( is_active=True).count()
+#         total_units = Unit.objects.count()
+#         total_locations = Location.objects.count()
+
+#         return Response({
+#             "total_events": total_events,
+#             "total_volunteers": total_volunteers,
+#             "total_units": total_units,
+#             "total_locations": total_locations
+#         }, status=status.HTTP_200_OK)
 
 # class VolunteerCountAPIVIew(APIView):
 #     def get(self, request):
@@ -1779,3 +1892,57 @@ class AttendanceFileUploadView(APIView):
 
         serializer = AttendanceFileUploadSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
+    
+class UnitSummaryAPIView(APIView):
+    """
+    POST API to get summary details of a unit in the same structure as TotalCountAPIView:
+    - volunteers_stats
+    - total_counts
+    """
+
+    def post(self, request):
+        unit_id = request.data.get("unit")
+
+        # Validate input
+        if not unit_id:
+            return Response({"error": "Unit ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if the unit exists
+        try:
+            unit = Unit.objects.get(id=unit_id)
+        except Unit.DoesNotExist:
+            return Response({"error": "Unit not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Volunteers in this unit
+        volunteers = Volunteer.objects.filter(unit_id=unit_id, is_active=True)
+        volunteers_stats = {
+            "total_male": volunteers.filter(gender__iexact="Male").count(),
+            "total_female": volunteers.filter(gender__iexact="Female").count(),
+            "total_registered": volunteers.filter(is_registered=True).count(),
+            "total_unregistered": volunteers.filter(is_registered=False).count(),
+            "unregistered_male": volunteers.filter(is_registered=False, gender__iexact="Male").count(),
+            "unregistered_female": volunteers.filter(is_registered=False, gender__iexact="Female").count(),
+            "total_active": volunteers.filter(is_active=True).count(),
+            "total_inactive": volunteers.filter(is_active=False).count(),
+            "grand_total": volunteers.count()
+        }
+
+        # Counts related to this unit
+        total_events = Events.objects.filter(units__id=unit_id).distinct().count()
+        total_units = Unit.objects.count()
+        total_locations = 1 if unit.location else 0  # unique locations of volunteers in this unit
+
+        total_counts = {
+            "total_events": total_events,
+            "total_units": total_units,
+            "total_locations": total_locations
+        }
+
+        data = {
+            "unit_id": unit.id,
+            "unit_name": unit.unit_name,
+            "volunteers_stats": volunteers_stats,
+            "total_counts": total_counts
+        }
+
+        return Response(data, status=status.HTTP_200_OK)
